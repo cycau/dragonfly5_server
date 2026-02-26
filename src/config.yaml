@@ -1,0 +1,39 @@
+nodeName: "dbapi-1"
+nodePort: 5678
+maxHttpQueue: 10000
+secretKey: "secret-key"
+
+logger:
+  level: debug      # debug, info, warn, error
+  dir: "logs"       # ログ出力先（カレントからの相対パス）
+  maxSizeMB: 100    # 1ファイル最大サイズ（MB）
+  maxBackups: 3     # 保持する世代数
+  maxAgeDays: 30    # 日数超過で削除（0=無制限）
+  compress: true    # ローテート済みをgzip圧縮
+
+clusterNodes:
+  - "http://localhost:5678"
+  - "http://localhost:5679"
+
+
+myDatasources:
+  - datasourceId: pg_master
+    databaseName: crm-system
+    driver: postgres # postgres, mysql
+    dsn: "postgres://admin:abcd1234@localhost:5432/lps?sslmode=disable"
+    maxConns: 20
+    maxWriteConns: 5
+    minWriteConns: 2
+    maxConnLifetimeSec: 1800
+    maxTxIdleTimeoutSec: 15
+    defaultQueryTimeoutSec: 30
+  - datasourceId: pg_slave01
+    databaseName: crm-system
+    driver: postgres
+    dsn: "postgres://admin:abcd1234@localhost:5432/lps?sslmode=disable"
+    maxConns: 20
+    maxWriteConns: 5
+    minWriteConns: 2
+    maxConnLifetimeSec: 1800
+    maxTxIdleTimeoutSec: 15
+    defaultQueryTimeoutSec: 30
