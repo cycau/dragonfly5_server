@@ -30,7 +30,7 @@ import (
 	"sync"
 	"time"
 
-	. "smartdatastream/server/global"
+	. "dragonfly5/server/global"
 
 	"github.com/paulbellamy/ratecounter"
 	"github.com/prometheus/client_golang/prometheus"

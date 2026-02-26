@@ -19,8 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"smartdatastream/server/global"
-	. "smartdatastream/server/global"
+	"dragonfly5/server/global"
 )
 
 type NodeStatus string
@@ -121,7 +120,7 @@ func (node *NodeInfo) Clone() NodeInfo {
 // It returns early with a possibly empty slice if the node is not SERVING,
 // HTTP queue is full, the datasource is inactive, or name/capacity filters fail.
 // Each returned ScoreWithWeight has score, weight, and exIndex (datasource index).
-func (node *NodeInfo) GetScore(tarDbName string, endpoint ENDPOINT_TYPE) []*ScoreWithWeight {
+func (node *NodeInfo) GetScore(tarDbName string, endpoint global.ENDPOINT_TYPE) []*ScoreWithWeight {
 	node.Mu.Lock()
 	defer node.Mu.Unlock()
 
@@ -141,7 +140,7 @@ func (node *NodeInfo) GetScore(tarDbName string, endpoint ENDPOINT_TYPE) []*Scor
 		if !dsInfo.Active {
 			return scores
 		}
-		if dsInfo.MaxWriteConns < 1 && (endpoint == EP_Execute || endpoint == EP_BeginTx) {
+		if dsInfo.MaxWriteConns < 1 && (endpoint == global.EP_Execute || endpoint == global.EP_BeginTx) {
 			return scores
 		}
 		if dsInfo.DatabaseName != tarDbName {
@@ -153,11 +152,11 @@ func (node *NodeInfo) GetScore(tarDbName string, endpoint ENDPOINT_TYPE) []*Scor
 
 		weight := 0.0
 		switch endpoint {
-		case EP_Query:
+		case global.EP_Query:
 			weight = float64(dsInfo.MaxConns - dsInfo.MinWriteConns)
-		case EP_Execute:
+		case global.EP_Execute:
 			weight = float64(dsInfo.MaxWriteConns)
-		case EP_BeginTx:
+		case global.EP_BeginTx:
 			weight = float64(dsInfo.MaxWriteConns * 8 / 10)
 		default:
 			weight = float64(dsInfo.MaxConns)
@@ -259,7 +258,7 @@ func calculateMetrics(node *NodeInfo, dsInfo *DatasourceInfo) normalizedMetrics 
 // If httpFree < 0.05 it returns 0.05. Otherwise it combines normalized
 // metrics with endpoint-specific weights: Query favors readFree and
 // latScore, Execute favors writeFree and errScore, BeginTx favors txFree.
-func calculateScore(endpoint ENDPOINT_TYPE, m normalizedMetrics) float64 {
+func calculateScore(endpoint global.ENDPOINT_TYPE, m normalizedMetrics) float64 {
 
 	s := 0.05
 	if m.httpFree < 0.05 {
@@ -267,7 +266,7 @@ func calculateScore(endpoint ENDPOINT_TYPE, m normalizedMetrics) float64 {
 	}
 
 	switch endpoint {
-	case EP_Query:
+	case global.EP_Query:
 		s = 0.25*m.httpFree +
 			0.35*m.readFree +
 			0.05*m.writeFree +
@@ -278,7 +277,7 @@ func calculateScore(endpoint ENDPOINT_TYPE, m normalizedMetrics) float64 {
 			0.08*m.toutScore +
 
 			0.02*m.uptimeScore
-	case EP_Execute:
+	case global.EP_Execute:
 		s = 0.15*m.httpFree +
 			0.05*m.readFree +
 			0.35*m.writeFree +
@@ -289,7 +288,7 @@ func calculateScore(endpoint ENDPOINT_TYPE, m normalizedMetrics) float64 {
 			0.08*m.toutScore +
 
 			0.02*m.uptimeScore
-	case EP_BeginTx:
+	case global.EP_BeginTx:
 		s = 0.05*m.httpFree +
 			0.05*m.readFree +
 			0.15*m.writeFree +

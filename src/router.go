@@ -27,9 +27,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"smartdatastream/server/cluster"
-	. "smartdatastream/server/global"
-	"smartdatastream/server/rdb"
+	"dragonfly5/server/cluster"
+	"dragonfly5/server/global"
+	"dragonfly5/server/rdb"
 )
 
 type Router struct {
@@ -210,17 +210,17 @@ func (r *Router) setupRoutes() {
 	// API v1 routes
 	r.Route("/rdb", func(router chi.Router) {
 		// Execute endpoint
-		router.Post(EP_PATH_QUERY, r.dmlHandler.Query)
-		router.Post(EP_PATH_EXECUTE, r.dmlHandler.Execute)
+		router.Post(global.EP_PATH_QUERY, r.dmlHandler.Query)
+		router.Post(global.EP_PATH_EXECUTE, r.dmlHandler.Execute)
 
 		// Transaction endpoints
 		router.Route("/tx", func(txRouter chi.Router) {
-			txRouter.Post(EP_PATH_TX_BEGIN, r.txHandler.BeginTx)
-			txRouter.Post(EP_PATH_QUERY, r.dmlHandler.QueryTx)
-			txRouter.Post(EP_PATH_EXECUTE, r.dmlHandler.ExecuteTx)
-			txRouter.Put(EP_PATH_TX_COMMIT, r.txHandler.CommitTx)
-			txRouter.Put(EP_PATH_TX_ROLLBACK, r.txHandler.RollbackTx)
-			txRouter.Put(EP_PATH_TX_CLOSE, r.txHandler.CloseTx)
+			txRouter.Post(global.EP_PATH_TX_BEGIN, r.txHandler.BeginTx)
+			txRouter.Post(global.EP_PATH_QUERY, r.dmlHandler.QueryTx)
+			txRouter.Post(global.EP_PATH_EXECUTE, r.dmlHandler.ExecuteTx)
+			txRouter.Put(global.EP_PATH_TX_COMMIT, r.txHandler.CommitTx)
+			txRouter.Put(global.EP_PATH_TX_ROLLBACK, r.txHandler.RollbackTx)
+			txRouter.Put(global.EP_PATH_TX_CLOSE, r.txHandler.CloseTx)
 		})
 	})
 }
