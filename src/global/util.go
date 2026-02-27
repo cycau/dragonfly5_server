@@ -148,7 +148,7 @@ var (
 
 	RP_DATASOURCE_NOT_FOUND   = &ResponseCode{httpCode: http.StatusBadGateway, msgcode: "DATASOURCE_NOT_FOUND"}
 	RP_DATASOURCE_UNAVAILABLE = &ResponseCode{httpCode: http.StatusServiceUnavailable, msgcode: "DATASOURCE_UNAVAILABLE"}
-	RP_DATASOURCE_TIMEOUT     = &ResponseCode{httpCode: http.StatusGatewayTimeout, msgcode: "DATASOURCE_TIMEOUT"}
+	RP_DATASOURCE_EXPIRED     = &ResponseCode{httpCode: http.StatusGatewayTimeout, msgcode: "DATASOURCE_EXPIRED"}
 	RP_DATASOURCE_EXCEPTION   = &ResponseCode{httpCode: http.StatusInsufficientStorage, msgcode: "DATASOURCE_EXCEPTION"}
 )
 

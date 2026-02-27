@@ -114,7 +114,7 @@ func (th *TxHandler) CommitTx(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err == ErrTxExpired {
-			ResponseError(w, RP_DATASOURCE_TIMEOUT, "Transaction timeout for commit")
+			ResponseError(w, RP_DATASOURCE_EXPIRED, "Transaction timeout for commit")
 			return
 		}
 		ResponseError(w, RP_DATASOURCE_EXCEPTION, err.Error())
@@ -153,7 +153,7 @@ func (th *TxHandler) RollbackTx(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err == ErrTxExpired {
-			ResponseError(w, RP_DATASOURCE_TIMEOUT, "Transaction timeout for rollback")
+			ResponseError(w, RP_DATASOURCE_EXPIRED, "Transaction timeout for rollback")
 			return
 		}
 		ResponseError(w, RP_DATASOURCE_EXCEPTION, err.Error())
@@ -193,7 +193,7 @@ func (th *TxHandler) CloseTx(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err == ErrTxExpired {
-			ResponseError(w, RP_DATASOURCE_TIMEOUT, "Transaction timeout for close")
+			ResponseError(w, RP_DATASOURCE_EXPIRED, "Transaction timeout for close")
 			return
 		}
 		ResponseError(w, RP_DATASOURCE_EXCEPTION, err.Error())
