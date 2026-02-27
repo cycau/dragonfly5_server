@@ -18,8 +18,11 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/http"
 	"sync/atomic"
 	"time"
 )
@@ -123,4 +126,52 @@ func GetDsIdxFromTxID(txID string) (dsIdx int, err error) {
 	offset += datasourceIndexSize
 
 	return int(datasourceIndex), nil
+}
+
+/*****************************
+ * Util
+ *****************************/
+// responseError sends a JSON error response with the given HTTP status code.
+// The body is {"error": {"code": code, "message": message}}. Content-Type
+// is set to application/json; charset=utf-8.
+type ResponseCode struct {
+	httpCode int
+	msgcode  string
+}
+
+var (
+	RP_REDIRECT_OTHER_NODE    = &ResponseCode{httpCode: http.StatusTemporaryRedirect, msgcode: "REDIRECT_OTHER_NODE"}
+	RP_BAD_REQUEST            = &ResponseCode{httpCode: http.StatusBadRequest, msgcode: "BAD_REQUEST"}
+	RP_UNAUTHORIZED           = &ResponseCode{httpCode: http.StatusUnauthorized, msgcode: "UNAUTHORIZED"}
+	RP_CLIENT_REQUEST_TIMEOUT = &ResponseCode{httpCode: http.StatusRequestTimeout, msgcode: "CLIENT_REQUEST_TIMEOUT"}
+	RP_SERVER_EXCEPTION       = &ResponseCode{httpCode: http.StatusInternalServerError, msgcode: "SERVER_EXCEPTION"}
+
+	RP_DATASOURCE_NOT_FOUND   = &ResponseCode{httpCode: http.StatusBadGateway, msgcode: "DATASOURCE_NOT_FOUND"}
+	RP_DATASOURCE_UNAVAILABLE = &ResponseCode{httpCode: http.StatusServiceUnavailable, msgcode: "DATASOURCE_UNAVAILABLE"}
+	RP_DATASOURCE_TIMEOUT     = &ResponseCode{httpCode: http.StatusGatewayTimeout, msgcode: "DATASOURCE_TIMEOUT"}
+	RP_DATASOURCE_EXCEPTION   = &ResponseCode{httpCode: http.StatusInsufficientStorage, msgcode: "DATASOURCE_EXCEPTION"}
+)
+
+// ResponseError sends a JSON error response with the given HTTP status code.
+// The body is {"error": {"code": code, "message": message}}. Content-Type
+// is set to application/json; charset=utf-8.
+func ResponseError(w http.ResponseWriter, responseCode *ResponseCode, message string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(responseCode.httpCode)
+
+	errorResp := map[string]any{
+		"error": map[string]any{
+			"msgcode": responseCode.msgcode,
+			"message": message,
+		},
+	}
+
+	slog.Error("ResponseError", "message", message)
+	json.NewEncoder(w).Encode(errorResp)
+}
+
+// ReturnError wraps an error with a message and logs it
+func ReturnError(err error, message string) error {
+	slog.Error("ReturnError", "message", message)
+	return err
 }

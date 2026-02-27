@@ -17,7 +17,6 @@ package rdb
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"dragonfly5/server/global"
 	"errors"
 	"fmt"
@@ -25,40 +24,10 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
 )
 
-// errAsBadConn wraps an error so that errors.Is(err, driver.ErrBadConn) is true.
-// Used to normalize pgx ConnectError for handlers that only check ErrBadConn.
-type errAsBadConn struct{ err error }
-
-func (e *errAsBadConn) Error() string        { return e.err.Error() }
-func (e *errAsBadConn) Unwrap() error        { return e.err }
-func (e *errAsBadConn) Is(target error) bool { return target == driver.ErrBadConn }
-
-// connectErrorToErrBadConnConnector wraps a driver.Connector so that
-// *pgconn.ConnectError is returned as an error satisfying
-// errors.Is(err, driver.ErrBadConn). Handlers can rely only on ErrBadConn
-// without importing pgconn.
-type connectErrorToErrBadConnConnector struct {
-	driver.Connector
-}
-
-// Connect calls the wrapped connector. If the returned error is a
-// *pgconn.ConnectError, it is wrapped in errAsBadConn so that
-// errors.Is(err, driver.ErrBadConn) is true.
-func (c *connectErrorToErrBadConnConnector) Connect(ctx context.Context) (driver.Conn, error) {
-	conn, err := c.Connector.Connect(ctx)
-	if err != nil {
-		var connectErr *pgconn.ConnectError
-		if errors.As(err, &connectErr) {
-			return nil, &errAsBadConn{err: err}
-		}
-		return nil, err
-	}
-	return conn, nil
-}
+var ErrDsException = errors.New("datasource exception")
 
 type Datasource struct {
 	DatasourceID string
@@ -86,14 +55,14 @@ func NewDatasource(config global.DatasourceConfig) (*Datasource, error) {
 	if driverName == "pgx" {
 		connConfig, err := pgx.ParseConfig(config.DSN)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse pgx config for %s: %w", config.DatasourceID, err)
+			return nil, global.ReturnError(ErrDsException, fmt.Sprintf("Failed to parse pgx config for %s: %v", config.DatasourceID, err))
 		}
-		db = sql.OpenDB(&connectErrorToErrBadConnConnector{Connector: stdlib.GetConnector(*connConfig)})
+		db = sql.OpenDB(stdlib.GetConnector(*connConfig))
 	} else {
 		var err error
 		db, err = sql.Open(driverName, config.DSN)
 		if err != nil {
-			return nil, fmt.Errorf("failed to open datasource %s: %w", config.DatasourceID, err)
+			return nil, global.ReturnError(ErrDsException, fmt.Sprintf("Failed to open datasource %s: %v", config.DatasourceID, err))
 		}
 	}
 
@@ -107,7 +76,7 @@ func NewDatasource(config global.DatasourceConfig) (*Datasource, error) {
 	// Ping to verify connection
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("failed to ping datasource %s: %w", config.DatasourceID, err)
+		return nil, global.ReturnError(err, fmt.Sprintf("Failed to ping datasource %s", config.DatasourceID))
 	}
 
 	return &Datasource{
@@ -125,7 +94,7 @@ func NewDatasource(config global.DatasourceConfig) (*Datasource, error) {
 func (d *Datasource) newTx(isolationLevel *sql.IsolationLevel) (*sql.Conn, *sql.Tx, error) {
 	conn, err := d.DB.Conn(context.Background())
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get connection: %w", err)
+		return nil, nil, err
 	}
 
 	txOptions := &sql.TxOptions{}
@@ -137,7 +106,7 @@ func (d *Datasource) newTx(isolationLevel *sql.IsolationLevel) (*sql.Conn, *sql.
 
 	if err != nil {
 		conn.Close()
-		return nil, nil, fmt.Errorf("failed to begin transaction: %w", err)
+		return nil, nil, err
 	}
 
 	return conn, tx, nil

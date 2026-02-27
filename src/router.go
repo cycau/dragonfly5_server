@@ -125,14 +125,14 @@ func (r *Router) collectHealth(isSync bool) {
 			defer cancel()
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, node.BaseURL+"/healz", nil)
 			if err != nil {
-				slog.Warn("Failed to create request for health", "nodeId", node.NodeID, "err", err)
+				slog.Warn("[Router] Failed to create request for health", "nodeId", node.NodeID, "err", err)
 				node.Mu.Lock()
 				node.Status = cluster.HEALZERR
 				return
 			}
 			response, err := http.DefaultClient.Do(req)
 			if err != nil {
-				slog.Warn("Failed to do request for health", "nodeId", node.NodeID, "err", err)
+				slog.Warn("[Router] Failed to do request for health", "nodeId", node.NodeID, "err", err)
 				node.Mu.Lock()
 				node.Status = cluster.HEALZERR
 				node.CheckTime = time.Now()
@@ -141,7 +141,7 @@ func (r *Router) collectHealth(isSync bool) {
 			defer response.Body.Close()
 			body, err := io.ReadAll(response.Body)
 			if err != nil {
-				slog.Warn("Failed to read response body for health", "nodeId", node.NodeID, "err", err)
+				slog.Warn("[Router] Failed to read response body for health", "nodeId", node.NodeID, "err", err)
 				node.Mu.Lock()
 				node.Status = cluster.HEALZERR
 				return
@@ -149,7 +149,7 @@ func (r *Router) collectHealth(isSync bool) {
 			var responsedNodeInfo cluster.NodeInfo
 			err = json.Unmarshal(body, &responsedNodeInfo)
 			if err != nil {
-				slog.Warn("Failed to unmarshal health info", "nodeId", node.NodeID, "err", err)
+				slog.Warn("[Router] Failed to unmarshal health info", "nodeId", node.NodeID, "err", err)
 				node.Mu.Lock()
 				node.Status = cluster.HEALZERR
 				return
@@ -165,6 +165,7 @@ func (r *Router) collectHealth(isSync bool) {
 			node.CheckTime = responsedNodeInfo.CheckTime
 			node.Datasources = responsedNodeInfo.Datasources
 			node.CheckTime = time.Now()
+
 		}(node)
 	}
 
@@ -186,7 +187,7 @@ func (r *Router) collectHealth(isSync bool) {
 		dsInfo.ErrorRate1m = errorRate1m
 		dsInfo.TimeoutRate1m = timeoutRate1m
 
-		slog.Debug("Router self node datasource stats", "dsIdx", dsIdx, "runningHttp", selfNode.RunningHttp, "runningRead", runningRead, "runningWrite", runningWrite, "runningTx", runningTx, "latencyP95Ms", latencyP95Ms, "errorRate1m", errorRate1m, "timeoutRate1m", timeoutRate1m)
+		slog.Debug("[Router] Self node datasource stats", "dsIdx", dsIdx, "runningHttp", selfNode.RunningHttp, "runningRead", runningRead, "runningWrite", runningWrite, "runningTx", runningTx, "latencyP95Ms", latencyP95Ms, "errorRate1m", errorRate1m, "timeoutRate1m", timeoutRate1m)
 	}
 	selfNode.CheckTime = time.Now()
 	selfNode.Mu.Unlock()

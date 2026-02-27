@@ -15,6 +15,7 @@
 package cluster
 
 import (
+	"log/slog"
 	"math"
 	"sync"
 	"time"
@@ -127,7 +128,6 @@ func (node *NodeInfo) GetScore(tarDbName string, endpoint global.ENDPOINT_TYPE) 
 	scores := make([]*ScoreWithWeight, 0, len(node.Datasources))
 
 	for dsIdx := range node.Datasources {
-
 		if node.Status != SERVING {
 			return scores
 		}
@@ -163,6 +163,7 @@ func (node *NodeInfo) GetScore(tarDbName string, endpoint global.ENDPOINT_TYPE) 
 		}
 
 		scores = append(scores, &ScoreWithWeight{score: score, weight: weight, exIndex: dsIdx})
+		slog.Debug("[NodeInfo] GetScore", "dsIdx", dsIdx, "endpoint", endpoint, "score", score, "weight", weight, "dsInfo", dsInfo)
 	}
 
 	return scores
