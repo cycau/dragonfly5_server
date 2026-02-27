@@ -17,11 +17,12 @@ package rdb
 import (
 	"context"
 	"database/sql"
+	. "dragonfly5/server/global"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
-	. "smartdatastream/server/global"
 	"time"
 )
 
@@ -63,18 +64,20 @@ func NewTxHandler(dsManager *DsManager) *TxHandler {
 func (th *TxHandler) BeginTx(w http.ResponseWriter, r *http.Request) {
 	dsIDX, req, isolationLevel, err := th.parseBeginRequest(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", fmt.Sprintf("Failed to parse request: %v", err))
+		ResponseError(w, RP_BAD_REQUEST, err.Error())
 		return
 	}
+
+	slog.Debug("[TxHandler] BeginTx", "dsIDX", dsIDX, "isolationLevel", isolationLevel, "maxTxTimeoutSec", req.MaxTxTimeoutSec)
 
 	// Begin transaction (default isolation level: ReadCommitted)
 	txEntry, err := th.dsManager.BeginTx(r.Context(), dsIDX, isolationLevel, req.MaxTxTimeoutSec)
 	if err != nil {
 		if err == context.DeadlineExceeded {
-			writeError(w, http.StatusRequestTimeout, "TIMEOUT", "Request timeout")
+			ResponseError(w, RP_CLIENT_REQUEST_TIMEOUT, "Request timeout")
 			return
 		}
-		writeError(w, statusCodeForDbError(err), "BEGIN_ERROR", fmt.Sprintf("Failed to begin transaction: %v", err))
+		ResponseError(w, RP_DATASOURCE_EXCEPTION, err.Error())
 		return
 	}
 
@@ -97,18 +100,24 @@ func (th *TxHandler) CommitTx(w http.ResponseWriter, r *http.Request) {
 	txID := getTxID(r)
 
 	if txID == "" {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "txId is required")
+		ResponseError(w, RP_BAD_REQUEST, "TxId is required")
 		return
 	}
+
+	slog.Debug("[TxHandler] CommitTx", "txID", txID)
 
 	// Commit transaction
 	err := th.dsManager.CommitTx(txID)
 	if err != nil {
 		if err == ErrTxNotFound {
-			writeError(w, http.StatusConflict, "TX_NOT_FOUND", "Transaction not found")
+			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Transaction not found for commit")
 			return
 		}
-		writeError(w, statusCodeForDbError(err), "COMMIT_ERROR", fmt.Sprintf("Failed to commit transaction: %v", err))
+		if err == ErrTxExpired {
+			ResponseError(w, RP_DATASOURCE_TIMEOUT, "Transaction timeout for commit")
+			return
+		}
+		ResponseError(w, RP_DATASOURCE_EXCEPTION, err.Error())
 		return
 	}
 
@@ -130,18 +139,24 @@ func (th *TxHandler) RollbackTx(w http.ResponseWriter, r *http.Request) {
 	txID := getTxID(r)
 
 	if txID == "" {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "txId is required")
+		ResponseError(w, RP_BAD_REQUEST, "TxId is required")
 		return
 	}
+
+	slog.Debug("[TxHandler] RollbackTx", "txID", txID)
 
 	// Rollback transaction
 	err := th.dsManager.RollbackTx(txID)
 	if err != nil {
 		if err == ErrTxNotFound {
-			writeError(w, http.StatusConflict, "TX_NOT_FOUND", "Transaction not found")
+			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Transaction not found for rollback")
 			return
 		}
-		writeError(w, statusCodeForDbError(err), "ROLLBACK_ERROR", fmt.Sprintf("Failed to rollback transaction: %v", err))
+		if err == ErrTxExpired {
+			ResponseError(w, RP_DATASOURCE_TIMEOUT, "Transaction timeout for rollback")
+			return
+		}
+		ResponseError(w, RP_DATASOURCE_EXCEPTION, err.Error())
 		return
 	}
 
@@ -164,18 +179,24 @@ func (th *TxHandler) CloseTx(w http.ResponseWriter, r *http.Request) {
 	txID := getTxID(r)
 
 	if txID == "" {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "txId is required")
+		ResponseError(w, RP_BAD_REQUEST, "TxId is required")
 		return
 	}
+
+	slog.Debug("[TxHandler] CloseTx", "txID", txID)
 
 	// Close transaction
 	err := th.dsManager.CloseTx(txID)
 	if err != nil {
 		if err == ErrTxNotFound {
-			writeError(w, http.StatusConflict, "TX_NOT_FOUND", "Transaction not found")
+			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Transaction not found for close")
 			return
 		}
-		writeError(w, statusCodeForDbError(err), "CLOSE_ERROR", fmt.Sprintf("Failed to close transaction: %v", err))
+		if err == ErrTxExpired {
+			ResponseError(w, RP_DATASOURCE_TIMEOUT, "Transaction timeout for close")
+			return
+		}
+		ResponseError(w, RP_DATASOURCE_EXCEPTION, err.Error())
 		return
 	}
 
@@ -204,13 +225,13 @@ func (th *TxHandler) parseBeginRequest(r *http.Request) (int, *TxRequestParams, 
 
 	var req TxRequestParams
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		return -1, nil, nil, fmt.Errorf("failed to parse request: %w", err)
+		return -1, nil, nil, fmt.Errorf("Failed to parse request: %w", err)
 	}
 
 	// get datasourceId from context
 	dsIDX, ok := GetCtxDsIdx(r)
 	if !ok {
-		return -1, nil, nil, fmt.Errorf("datasource INDEX is required")
+		return -1, nil, nil, fmt.Errorf("Datasource INDEX hasn't decided by Balancer")
 	}
 
 	if req.IsolationLevel == nil {
@@ -228,7 +249,7 @@ func (th *TxHandler) parseBeginRequest(r *http.Request) (int, *TxRequestParams, 
 	case "SERIALIZABLE":
 		isolationLevel = sql.LevelSerializable
 	default:
-		return -1, nil, nil, fmt.Errorf("invalid isolation level: %s", *req.IsolationLevel)
+		return -1, nil, nil, fmt.Errorf("Invalid isolation level: %s. (expected: READ_UNCOMMITTED, READ_COMMITTED, REPEATABLE_READ, SERIALIZABLE)", *req.IsolationLevel)
 	}
 
 	return dsIDX, &req, &isolationLevel, nil

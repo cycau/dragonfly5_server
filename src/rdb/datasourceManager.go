@@ -17,10 +17,10 @@ package rdb
 import (
 	"context"
 	"database/sql"
+	"dragonfly5/server/global"
 	"errors"
 	"fmt"
 	"log/slog"
-	"smartdatastream/server/global"
 	"sync"
 	"time"
 
@@ -28,8 +28,10 @@ import (
 )
 
 var (
-	ErrTxNotFound = errors.New("transaction not found")
-	ErrTxExpired  = errors.New("transaction expired")
+	ErrDsNotFound  = errors.New("datasource not found")
+	ErrTxNotFound  = errors.New("transaction not found")
+	ErrTxExpired   = errors.New("transaction expired")
+	ErrTxException = errors.New("transaction exception")
 )
 
 // TxEntry represents one active transaction: a dedicated connection and
@@ -221,7 +223,7 @@ func NewDsManager(configs []global.DatasourceConfig) *DsManager {
 func (dm *DsManager) allocateSemaphore(ctx context.Context, datasourceIdx int, resourceType ResourceType) (*TxDatasource, error) {
 	ds := dm.dss[datasourceIdx]
 	if ds == nil {
-		return nil, fmt.Errorf("datasource %d not found", datasourceIdx)
+		return nil, global.ReturnError(ErrDsNotFound, fmt.Sprintf("datasource[%d] not found", datasourceIdx))
 	}
 
 	ds.mu.Lock()
@@ -242,7 +244,7 @@ func (dm *DsManager) allocateSemaphore(ctx context.Context, datasourceIdx int, r
 			ds.mu.Lock()
 			ds.runningRead--
 			ds.mu.Unlock()
-			return nil, fmt.Errorf("failed to acquire read semaphore: %w", err)
+			return nil, global.ReturnError(err, fmt.Sprintf("Failed to acquire read semaphore: %v", err))
 		}
 	case RESOURCE_TYPE_WRITE:
 		err := ds.semWrite.Acquire(ctx, 1)
@@ -250,7 +252,7 @@ func (dm *DsManager) allocateSemaphore(ctx context.Context, datasourceIdx int, r
 			ds.mu.Lock()
 			ds.runningWrite--
 			ds.mu.Unlock()
-			return nil, fmt.Errorf("failed to acquire write semaphore: %w", err)
+			return nil, global.ReturnError(err, fmt.Sprintf("Failed to acquire write semaphore: %v", err))
 		}
 	case RESOURCE_TYPE_TX:
 		err := ds.semTx.Acquire(ctx, 1)
@@ -258,7 +260,7 @@ func (dm *DsManager) allocateSemaphore(ctx context.Context, datasourceIdx int, r
 			ds.mu.Lock()
 			ds.runningTx--
 			ds.mu.Unlock()
-			return nil, fmt.Errorf("failed to acquire transaction semaphore: %w", err)
+			return nil, global.ReturnError(err, fmt.Sprintf("Failed to acquire transaction semaphore: %v", err))
 		}
 		err = ds.semWrite.Acquire(ctx, 1)
 		if err != nil {
@@ -266,7 +268,7 @@ func (dm *DsManager) allocateSemaphore(ctx context.Context, datasourceIdx int, r
 			ds.mu.Lock()
 			ds.runningTx--
 			ds.mu.Unlock()
-			return nil, fmt.Errorf("failed to acquire transaction semaphore: %w", err)
+			return nil, global.ReturnError(err, fmt.Sprintf("Failed to acquire transaction semaphore: %v", err))
 		}
 	}
 
@@ -316,7 +318,7 @@ func (dm *DsManager) BeginTx(ctx context.Context, datasourceIdx int, isolationLe
 
 		ds.semTx.Release(1)
 		ds.semWrite.Release(1)
-		return nil, fmt.Errorf("failed to start transaction: %w", err)
+		return nil, global.ReturnError(ErrTxException, fmt.Sprintf("Failed to start transaction: %v", err))
 	}
 
 	idleTimeout := &ds.MaxTxIdleTimeout
@@ -354,7 +356,7 @@ func (dm *DsManager) getTx(txID string, executing bool) (entry *TxEntry, dsIdx i
 
 	ds := dm.dss[dsIdx]
 	if ds == nil {
-		return nil, -1, fmt.Errorf("datasource not found: %d", dsIdx)
+		return nil, -1, global.ReturnError(ErrDsNotFound, fmt.Sprintf("datasource[%d] not found", dsIdx))
 	}
 
 	entry, err = ds.getEntry(txID, executing)
@@ -378,7 +380,7 @@ func (dm *DsManager) CommitTx(txID string) error {
 	err = entry.commit()
 
 	if err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+		return global.ReturnError(ErrTxException, fmt.Sprintf("failed to commit transaction: %v", err))
 	}
 
 	return nil
@@ -396,7 +398,7 @@ func (dm *DsManager) RollbackTx(txID string) error {
 
 	err = entry.rollback()
 	if err != nil {
-		return fmt.Errorf("failed to rollback transaction: %w", err)
+		return global.ReturnError(ErrTxException, fmt.Sprintf("failed to rollback transaction: %v", err))
 	}
 
 	return nil
@@ -424,7 +426,7 @@ func (dm *DsManager) CloseTx(txID string) error {
 
 	err = entry.Conn.Close()
 	if err != nil {
-		return fmt.Errorf("failed to close connection: %w", err)
+		return global.ReturnError(ErrTxException, fmt.Sprintf("failed to close connection: %v", err))
 	}
 
 	return nil

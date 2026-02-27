@@ -16,13 +16,13 @@ package cluster
 
 import (
 	"context"
+	"dragonfly5/server/global"
+	. "dragonfly5/server/global"
 	"fmt"
 	"io"
 	"log/slog"
 	"math/rand"
 	"net/http"
-	"smartdatastream/server/global"
-	. "smartdatastream/server/global"
 	"sort"
 	"strconv"
 	"strings"
@@ -62,13 +62,13 @@ func (b *Balancer) SelectNode(next http.Handler) http.Handler {
 		}
 		secretKey := r.Header.Get(HEADER_SECRET_KEY)
 		if secretKey != b.SelfNode.SecretKey {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			global.ResponseError(w, RP_UNAUTHORIZED, "Unauthorized")
 			return
 		}
 
 		err, endpoint, tarDbName, txID, redirectCount := parseRequest(r)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			global.ResponseError(w, RP_BAD_REQUEST, err.Error())
 			return
 		}
 
@@ -99,49 +99,46 @@ func (b *Balancer) SelectNode(next http.Handler) http.Handler {
 			return
 		}
 
-		/*** 自分から探す ***/
+		slog.Debug("[Balancer] SelectNode", "SelfNode", b.SelfNode, "OtherNodes", b.OtherNodes, "redirectCount", redirectCount)
 
+		/*** 自分から探す ***/
 		// 使用率80%以下なら自分で処理、それ以外は他ノードとの協調で処理
 		// Weight抽選で、自分のScoreの方が高い場合は自分で処理
 		// それ以外はredirect、Max３回か、自分にリダイレクトされた場合は終了（Client側実装）
-		selfBestScore, selfRecommendDs := selectSelfDatasource(b.SelfNode, tarDbName, endpoint)
-		slog.Debug("Balancer self best score", "selfBestScore", selfBestScore, "selfRecommendDs", selfRecommendDs)
-		if selfRecommendDs != nil {
-			slog.Debug("Balancer serving on self node", "exIndex", selfRecommendDs.exIndex)
-			b.runHandler(next, w, r, selfRecommendDs.exIndex)
+		selfBestScore, selfRecommendDsScore := selectSelfDatasource(b.SelfNode, tarDbName, endpoint)
+		slog.Debug("[Balancer] Self best score", "selfBestScore", selfBestScore, "selfRecommendDsScore", selfRecommendDsScore)
+		if selfRecommendDsScore != nil {
+			b.runHandler(next, w, r, selfRecommendDsScore.exIndex)
 			return
 		}
+
 		// Client側で、最後のリダイレクトの場合（リダイレクトを受け付けない場合）
 		if redirectCount < 1 {
 			if selfBestScore == nil {
-				http.Error(w, fmt.Sprintf("No resource to process on this node. Node[%s], RedirectCount[%d]", b.SelfNode.NodeID, redirectCount), http.StatusServiceUnavailable)
+				global.ResponseError(w, RP_DATASOURCE_UNAVAILABLE, fmt.Sprintf("No resource to process on this node. Node[%s], RedirectCount[%d]", b.SelfNode.NodeID, redirectCount))
 				return
 			}
-			slog.Debug("Balancer forced serving on self node", "exIndex", selfBestScore.exIndex)
 			b.runHandler(next, w, r, selfBestScore.exIndex)
 			return
 		}
 
 		/*** 他のノード選択 ***/
 		recommendNodeScore, recommendNode := selectOtherNode(b.OtherNodes, tarDbName, endpoint)
-		slog.Debug("Balancer recommend node score", "recommendNodeScore", recommendNodeScore, "recommendNode", recommendNode)
+		slog.Debug("[Balancer] Recommend node score", "recommendNodeScore", recommendNodeScore, "recommendNode", recommendNode)
 		if recommendNode == nil {
 			// ゲート条件チェックは行わない
 			// DB枯渇しても、Httpバッファリングが可能な場合は処理を継続させる
 			if selfBestScore != nil {
-				slog.Debug("Balancer no recommend node, serving on self", "exIndex", selfBestScore.exIndex)
 				b.runHandler(next, w, r, selfBestScore.exIndex)
 				return
 			}
-			slog.Debug("Balancer no candidate nodes, processing locally despite lack of capacity")
-			http.Error(w, "No candidate nodes available and no capacity to process locally", http.StatusServiceUnavailable)
+			global.ResponseError(w, RP_DATASOURCE_UNAVAILABLE, "No candidate nodes available and no capacity to process locally")
 			return
 		}
 
 		// 自分のScoreの方が高い場合は自分で処理
 		if selfBestScore.score > recommendNodeScore.score {
 			// さらに他ノードBestScoreとの比較はやめる、一瞬他ノードに集中させてしまう恐れあり
-			slog.Debug("Balancer self score higher, serving on self", "exIndex", selfBestScore.exIndex)
 			b.runHandler(next, w, r, selfBestScore.exIndex)
 			return
 		}
@@ -152,8 +149,7 @@ func (b *Balancer) SelectNode(next http.Handler) http.Handler {
 			r.Body.Close()
 		}
 		w.Header().Set("Location", recommendNode.NodeID)
-		w.WriteHeader(http.StatusTemporaryRedirect)
-		slog.Debug("Balancer redirecting", "nodeId", recommendNode.NodeID)
+		global.ResponseError(w, RP_REDIRECT_OTHER_NODE, fmt.Sprintf("Redirecting to other node %s from %s", recommendNode.NodeID, b.SelfNode.NodeID))
 	}
 	return http.HandlerFunc(fn)
 }
@@ -190,11 +186,6 @@ func (b *Balancer) runHandler(next http.Handler, w http.ResponseWriter, r *http.
 func selectSelfDatasource(selfNode *NodeInfo, tarDbName string, endpoint ENDPOINT_TYPE) (bestScore *ScoreWithWeight, recommendScore *ScoreWithWeight) {
 
 	scores := selfNode.GetScore(tarDbName, endpoint)
-	for i, s := range scores {
-		if s != nil {
-			slog.Debug("Balancer self node score", "i", i, "score", *s)
-		}
-	}
 
 	// ノード選択（TopK + Weighted Random）
 	best, bestRandom := selectBestRandomScore(scores)
@@ -224,11 +215,6 @@ func selectOtherNode(otherNodes []*NodeInfo, tarDbName string, endpoint ENDPOINT
 			score.exIndex = nodeIdx
 		}
 		scores = append(scores, nodeScores...)
-	}
-	for i, s := range scores {
-		if s != nil {
-			slog.Debug("Balancer other node score", "i", i, "score", *s)
-		}
 	}
 
 	// ノード選択
