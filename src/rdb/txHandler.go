@@ -109,12 +109,16 @@ func (th *TxHandler) CommitTx(w http.ResponseWriter, r *http.Request) {
 	// Commit transaction
 	err := th.dsManager.CommitTx(txID)
 	if err != nil {
-		if err == ErrTxNotFound {
-			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Transaction not found for commit")
+		if err == ErrDsNotFound {
+			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Datasource not found for commit")
 			return
 		}
-		if err == ErrTxExpired {
-			ResponseError(w, RP_DATASOURCE_EXPIRED, "Transaction timeout for commit")
+		if err == ErrTxNotFound {
+			ResponseError(w, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for commit")
+			return
+		}
+		if r.Context().Err() == context.DeadlineExceeded {
+			ResponseError(w, RP_CLIENT_REQUEST_TIMEOUT, "Request timeout for commit")
 			return
 		}
 		ResponseError(w, RP_DATASOURCE_EXCEPTION, err.Error())
@@ -148,12 +152,16 @@ func (th *TxHandler) RollbackTx(w http.ResponseWriter, r *http.Request) {
 	// Rollback transaction
 	err := th.dsManager.RollbackTx(txID)
 	if err != nil {
-		if err == ErrTxNotFound {
-			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Transaction not found for rollback")
+		if err == ErrDsNotFound {
+			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Datasource not found for rollback")
 			return
 		}
-		if err == ErrTxExpired {
-			ResponseError(w, RP_DATASOURCE_EXPIRED, "Transaction timeout for rollback")
+		if err == ErrTxNotFound {
+			ResponseError(w, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for rollback")
+			return
+		}
+		if r.Context().Err() == context.DeadlineExceeded {
+			ResponseError(w, RP_CLIENT_REQUEST_TIMEOUT, "Request timeout for rollback")
 			return
 		}
 		ResponseError(w, RP_DATASOURCE_EXCEPTION, err.Error())
@@ -188,12 +196,16 @@ func (th *TxHandler) CloseTx(w http.ResponseWriter, r *http.Request) {
 	// Close transaction
 	err := th.dsManager.CloseTx(txID)
 	if err != nil {
-		if err == ErrTxNotFound {
-			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Transaction not found for close")
+		if err == ErrDsNotFound {
+			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Datasource not found for close")
 			return
 		}
-		if err == ErrTxExpired {
-			ResponseError(w, RP_DATASOURCE_EXPIRED, "Transaction timeout for close")
+		if err == ErrTxNotFound {
+			ResponseError(w, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for close")
+			return
+		}
+		if r.Context().Err() == context.DeadlineExceeded {
+			ResponseError(w, RP_CLIENT_REQUEST_TIMEOUT, "Request timeout for close")
 			return
 		}
 		ResponseError(w, RP_DATASOURCE_EXCEPTION, err.Error())
