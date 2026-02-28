@@ -146,10 +146,10 @@ var (
 	RP_CLIENT_REQUEST_TIMEOUT = &ResponseCode{httpCode: http.StatusRequestTimeout, msgcode: "CLIENT_REQUEST_TIMEOUT"}
 	RP_SERVER_EXCEPTION       = &ResponseCode{httpCode: http.StatusInternalServerError, msgcode: "SERVER_EXCEPTION"}
 
-	RP_DATASOURCE_NOT_FOUND   = &ResponseCode{httpCode: http.StatusBadGateway, msgcode: "DATASOURCE_NOT_FOUND"}
-	RP_DATASOURCE_UNAVAILABLE = &ResponseCode{httpCode: http.StatusServiceUnavailable, msgcode: "DATASOURCE_UNAVAILABLE"}
-	RP_DATASOURCE_TIMEOUT     = &ResponseCode{httpCode: http.StatusGatewayTimeout, msgcode: "DATASOURCE_TIMEOUT"}
-	RP_DATASOURCE_EXCEPTION   = &ResponseCode{httpCode: http.StatusInsufficientStorage, msgcode: "DATASOURCE_EXCEPTION"}
+	RP_DATASOURCE_NOT_FOUND    = &ResponseCode{httpCode: http.StatusBadGateway, msgcode: "DATASOURCE_NOT_FOUND"}
+	RP_DATASOURCE_UNAVAILABLE  = &ResponseCode{httpCode: http.StatusServiceUnavailable, msgcode: "DATASOURCE_UNAVAILABLE"}
+	RP_DATASOURCE_EXCEPTION    = &ResponseCode{httpCode: http.StatusInsufficientStorage, msgcode: "DATASOURCE_EXCEPTION"}
+	RP_DATASOURCE_TX_NOT_FOUND = &ResponseCode{httpCode: http.StatusBadGateway, msgcode: "DATASOURCE_TX_NOT_FOUND"}
 )
 
 // ResponseError sends a JSON error response with the given HTTP status code.

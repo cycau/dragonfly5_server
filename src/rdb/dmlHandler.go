@@ -155,9 +155,13 @@ func (dh *DmlHandler) Query(w http.ResponseWriter, r *http.Request) {
 		defer releaseResource()
 	}
 	if err != nil {
+		if err == ErrDsNotFound {
+			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Datasource not found for Query")
+			return
+		}
 		if r.Context().Err() == context.DeadlineExceeded {
 			dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
-			ResponseError(w, RP_CLIENT_REQUEST_TIMEOUT, "Request timeout")
+			ResponseError(w, RP_CLIENT_REQUEST_TIMEOUT, "Request timeout for Query")
 			return
 		}
 		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
@@ -201,9 +205,17 @@ func (dh *DmlHandler) QueryTx(w http.ResponseWriter, r *http.Request) {
 		defer releaseResource()
 	}
 	if err != nil {
+		if err == ErrDsNotFound {
+			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Datasource not found for QueryTx")
+			return
+		}
+		if err == ErrTxNotFound {
+			ResponseError(w, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for QueryTx")
+			return
+		}
 		if r.Context().Err() == context.DeadlineExceeded {
 			dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
-			ResponseError(w, RP_CLIENT_REQUEST_TIMEOUT, "Request timeout")
+			ResponseError(w, RP_CLIENT_REQUEST_TIMEOUT, "Request timeout for QueryTx")
 			return
 		}
 		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
@@ -338,9 +350,13 @@ func (dh *DmlHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		defer releaseResource()
 	}
 	if err != nil {
+		if err == ErrDsNotFound {
+			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Datasource not found for Execute")
+			return
+		}
 		if r.Context().Err() == context.DeadlineExceeded {
 			dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
-			ResponseError(w, RP_CLIENT_REQUEST_TIMEOUT, "Request timeout")
+			ResponseError(w, RP_CLIENT_REQUEST_TIMEOUT, "Request timeout for Execute")
 			return
 		}
 		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
@@ -396,9 +412,17 @@ func (dh *DmlHandler) ExecuteTx(w http.ResponseWriter, r *http.Request) {
 		defer releaseResource()
 	}
 	if err != nil {
+		if err == ErrDsNotFound {
+			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Datasource not found for ExecuteTx")
+			return
+		}
+		if err == ErrTxNotFound {
+			ResponseError(w, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for ExecuteTx")
+			return
+		}
 		if r.Context().Err() == context.DeadlineExceeded {
 			dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
-			ResponseError(w, RP_CLIENT_REQUEST_TIMEOUT, "Request timeout")
+			ResponseError(w, RP_CLIENT_REQUEST_TIMEOUT, "Request timeout for ExecuteTx")
 			return
 		}
 		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
