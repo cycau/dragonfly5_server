@@ -15,8 +15,12 @@
 package global
 
 import (
+	"context"
+	"log/slog"
 	"net/http"
 	"strings"
+
+	gonanoid "github.com/matoous/go-nanoid/v2"
 )
 
 type Config struct {
@@ -96,6 +100,7 @@ func GetEndpointType(path string) ENDPOINT_TYPE {
 }
 
 const CTX_DS_IDX = "$S_IDX"
+const CTX_LOGGER = "$LOGGER"
 
 // GetCtxDsIdx returns the datasource index stored in the request context.
 // The index is set by the balancer middleware (CTX_DS_IDX) after node selection.
@@ -103,4 +108,41 @@ const CTX_DS_IDX = "$S_IDX"
 func GetCtxDsIdx(r *http.Request) (int, bool) {
 	value, ok := r.Context().Value(CTX_DS_IDX).(int)
 	return value, ok
+}
+
+// Logger is a wrapper for slog.Logger.
+type Logger struct {
+	requestId string
+}
+
+func (l *Logger) Debug(msg string, args ...any) {
+	slog.Debug(l.requestId, append([]any{"spot", msg}, args...)...)
+}
+func (l *Logger) Info(msg string, args ...any) {
+	slog.Info(l.requestId, append([]any{"spot", msg}, args...)...)
+}
+func (l *Logger) Warn(msg string, args ...any) {
+	slog.Warn(l.requestId, append([]any{"spot", msg}, args...)...)
+}
+func (l *Logger) Error(msg string, args ...any) {
+	slog.Error(l.requestId, append([]any{"spot", msg}, args...)...)
+}
+
+// NewLogger creates a new Logger.
+func NewLogger(traceId string) *Logger {
+	if traceId == "" {
+		traceId, _ = gonanoid.New(9)
+		traceId = "D5" + traceId
+	}
+	return &Logger{requestId: traceId}
+}
+
+// GetCtxLogger returns the Logger stored in the request context.
+// If not found, create a new Logger with an empty requestId.
+func GetCtxLogger(ctx context.Context) *Logger {
+	logger, ok := ctx.Value(CTX_LOGGER).(*Logger)
+	if ok {
+		return logger
+	}
+	return NewLogger("")
 }

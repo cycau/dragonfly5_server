@@ -21,13 +21,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
 
+	"dragonfly5/server/global"
 	. "dragonfly5/server/global"
 
 	"github.com/paulbellamy/ratecounter"
@@ -147,7 +147,7 @@ func (dh *DmlHandler) Query(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Debug("[DmlHandler] Executing Query", "dsIDX", dsIDX, "sql", req.SQL, "params", parameters)
+	global.GetCtxLogger(r.Context()).Debug("DmlHandler", "detail", "Executing Query", "dsIDX", dsIDX, "sql", req.SQL, "params", parameters)
 
 	// Execute query without transaction
 	rows, releaseResource, err := dh.dsManager.Query(r.Context(), req.TimeoutSec, dsIDX, req.SQL, parameters...)
@@ -159,9 +159,9 @@ func (dh *DmlHandler) Query(w http.ResponseWriter, r *http.Request) {
 			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Datasource not found for Query")
 			return
 		}
-		if r.Context().Err() == context.DeadlineExceeded {
+		if err == context.DeadlineExceeded {
 			dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
-			ResponseError(w, RP_CLIENT_REQUEST_TIMEOUT, "Request timeout for Query")
+			ResponseError(w, RP_CLIENT_CANCELLED, "Request timeout for Query")
 			return
 		}
 		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
@@ -197,7 +197,7 @@ func (dh *DmlHandler) QueryTx(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Debug("[DmlHandler] Executing QueryTx", "txID", txID, "sql", req.SQL, "params", parameters)
+	global.GetCtxLogger(r.Context()).Debug("DmlHandler", "detail", "Executing QueryTx", "txID", txID, "sql", req.SQL, "params", parameters)
 
 	// Execute query in transaction
 	rows, releaseResource, dsIDX, err := dh.dsManager.QueryTx(r.Context(), req.TimeoutSec, txID, req.SQL, parameters...)
@@ -213,9 +213,9 @@ func (dh *DmlHandler) QueryTx(w http.ResponseWriter, r *http.Request) {
 			ResponseError(w, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for QueryTx")
 			return
 		}
-		if r.Context().Err() == context.DeadlineExceeded {
+		if err == context.DeadlineExceeded {
 			dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
-			ResponseError(w, RP_CLIENT_REQUEST_TIMEOUT, "Request timeout for QueryTx")
+			ResponseError(w, RP_CLIENT_CANCELLED, "Request timeout for QueryTx")
 			return
 		}
 		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
@@ -342,7 +342,7 @@ func (dh *DmlHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		ResponseError(w, RP_BAD_REQUEST, err.Error())
 		return
 	}
-	slog.Debug("[DmlHandler] Executing Execute", "dsIDX", dsIDX, "sql", req.SQL, "params", parameters)
+	global.GetCtxLogger(r.Context()).Debug("DmlHandler", "detail", "Executing Execute", "dsIDX", dsIDX, "sql", req.SQL, "params", parameters)
 
 	// Get database
 	result, releaseResource, err := dh.dsManager.Execute(r.Context(), req.TimeoutSec, dsIDX, req.SQL, parameters...)
@@ -354,9 +354,9 @@ func (dh *DmlHandler) Execute(w http.ResponseWriter, r *http.Request) {
 			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Datasource not found for Execute")
 			return
 		}
-		if r.Context().Err() == context.DeadlineExceeded {
+		if err == context.DeadlineExceeded {
 			dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
-			ResponseError(w, RP_CLIENT_REQUEST_TIMEOUT, "Request timeout for Execute")
+			ResponseError(w, RP_CLIENT_CANCELLED, "Request timeout for Execute")
 			return
 		}
 		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
@@ -404,7 +404,7 @@ func (dh *DmlHandler) ExecuteTx(w http.ResponseWriter, r *http.Request) {
 		ResponseError(w, RP_BAD_REQUEST, err.Error())
 		return
 	}
-	slog.Debug("[DmlHandler] Executing ExecuteTx", "txID", txID, "sql", req.SQL, "params", parameters)
+	global.GetCtxLogger(r.Context()).Debug("DmlHandler", "detail", "Executing ExecuteTx", "txID", txID, "sql", req.SQL, "params", parameters)
 
 	// Execute in transaction
 	result, releaseResource, dsIDX, err := dh.dsManager.ExecuteTx(r.Context(), req.TimeoutSec, txID, req.SQL, parameters...)
@@ -420,9 +420,9 @@ func (dh *DmlHandler) ExecuteTx(w http.ResponseWriter, r *http.Request) {
 			ResponseError(w, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for ExecuteTx")
 			return
 		}
-		if r.Context().Err() == context.DeadlineExceeded {
+		if err == context.DeadlineExceeded {
 			dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
-			ResponseError(w, RP_CLIENT_REQUEST_TIMEOUT, "Request timeout for ExecuteTx")
+			ResponseError(w, RP_CLIENT_CANCELLED, "Request timeout for ExecuteTx")
 			return
 		}
 		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
@@ -556,7 +556,6 @@ func convertParams(params []ParamValue) ([]any, error) {
 			return nil, fmt.Errorf("param[%d]: %w", i, err)
 		}
 		args[i] = arg
-		slog.Debug("[DmlHandler] Converted param", "i", i, "param", p, "arg", arg)
 	}
 	return args, nil
 }

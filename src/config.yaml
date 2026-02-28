@@ -4,12 +4,12 @@ maxHttpQueue: 10000
 secretKey: "secret-key"
 
 logger:
-  level: debug      # debug, info, warn, error
-  dir: "logs"       # ログ出力先（カレントからの相対パス）
+  level: info      # debug, info, warn, error
+  dir: "logs"      # ログ出力先（カレントからの相対パス）
   maxSizeMB: 100    # 1ファイル最大サイズ（MB）
-  maxBackups: 3     # 保持する世代数
-  maxAgeDays: 30    # 日数超過で削除（0=無制限）
-  compress: true    # ローテート済みをgzip圧縮
+  maxBackups: 10    # 保持する世代数
+  maxAgeDays: 0     # 日数超過で削除（0=無制限）
+  compress: false   # ローテート済みをgzip圧縮
 
 clusterNodes:
   - "http://localhost:5678"
@@ -22,8 +22,8 @@ myDatasources:
     driver: postgres # postgres, mysql
     dsn: "postgres://admin:abcd1234@localhost:5432/lps?sslmode=disable"
     maxConns: 20
-    maxWriteConns: 5
-    minWriteConns: 2
+    maxWriteConns: 10
+    minWriteConns: 4
     maxConnLifetimeSec: 1800
     maxTxIdleTimeoutSec: 15
     defaultQueryTimeoutSec: 30
@@ -32,8 +32,8 @@ myDatasources:
     driver: postgres
     dsn: "postgres://admin:abcd1234@localhost:5432/lps?sslmode=disable"
     maxConns: 20
-    maxWriteConns: 5
-    minWriteConns: 2
+    maxWriteConns: 10
+    minWriteConns: 4
     maxConnLifetimeSec: 1800
     maxTxIdleTimeoutSec: 15
     defaultQueryTimeoutSec: 30

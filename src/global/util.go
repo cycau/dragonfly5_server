@@ -140,11 +140,11 @@ type ResponseCode struct {
 }
 
 var (
-	RP_REDIRECT_OTHER_NODE    = &ResponseCode{httpCode: http.StatusTemporaryRedirect, msgcode: "REDIRECT_OTHER_NODE"}
-	RP_BAD_REQUEST            = &ResponseCode{httpCode: http.StatusBadRequest, msgcode: "BAD_REQUEST"}
-	RP_UNAUTHORIZED           = &ResponseCode{httpCode: http.StatusUnauthorized, msgcode: "UNAUTHORIZED"}
-	RP_CLIENT_REQUEST_TIMEOUT = &ResponseCode{httpCode: http.StatusRequestTimeout, msgcode: "CLIENT_REQUEST_TIMEOUT"}
-	RP_SERVER_EXCEPTION       = &ResponseCode{httpCode: http.StatusInternalServerError, msgcode: "SERVER_EXCEPTION"}
+	RP_RECOMMEND_OTHER_NODE = &ResponseCode{httpCode: http.StatusTemporaryRedirect, msgcode: "RECOMMEND_OTHER_NODE"}
+	RP_BAD_REQUEST          = &ResponseCode{httpCode: http.StatusBadRequest, msgcode: "BAD_REQUEST"}
+	RP_UNAUTHORIZED         = &ResponseCode{httpCode: http.StatusUnauthorized, msgcode: "UNAUTHORIZED"}
+	RP_CLIENT_CANCELLED     = &ResponseCode{httpCode: http.StatusRequestTimeout, msgcode: "CLIENT_CANCELLED"}
+	RP_SERVER_EXCEPTION     = &ResponseCode{httpCode: http.StatusInternalServerError, msgcode: "SERVER_EXCEPTION"}
 
 	RP_DATASOURCE_NOT_FOUND    = &ResponseCode{httpCode: http.StatusBadGateway, msgcode: "DATASOURCE_NOT_FOUND"}
 	RP_DATASOURCE_UNAVAILABLE  = &ResponseCode{httpCode: http.StatusServiceUnavailable, msgcode: "DATASOURCE_UNAVAILABLE"}
