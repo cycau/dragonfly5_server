@@ -20,7 +20,6 @@ import (
 	. "dragonfly5/server/global"
 	"fmt"
 	"io"
-	"log/slog"
 	"math/rand"
 	"net/http"
 	"sort"
@@ -74,6 +73,11 @@ func (b *Balancer) SelectNode(next http.Handler) http.Handler {
 
 		// RunningHttp count
 		b.SelfNode.Mu.Lock()
+		if b.SelfNode.RunningHttp >= b.SelfNode.MaxHttpQueue {
+			b.SelfNode.Mu.Unlock()
+			global.ResponseError(w, RP_DATASOURCE_UNAVAILABLE, fmt.Sprintf("No resource to process on this node. Node[%s], RunningHttp[%d]", b.SelfNode.NodeID, b.SelfNode.RunningHttp))
+			return
+		}
 		b.SelfNode.RunningHttp++
 		b.SelfNode.Mu.Unlock()
 		defer func() {
@@ -99,14 +103,14 @@ func (b *Balancer) SelectNode(next http.Handler) http.Handler {
 			return
 		}
 
-		slog.Debug("[Balancer] SelectNode", "SelfNode", b.SelfNode, "OtherNodes", b.OtherNodes, "redirectCount", redirectCount)
+		global.GetCtxLogger(r.Context()).Debug("Balancer", "detail", "SelectNode", "SelfNode", b.SelfNode, "OtherNodes", b.OtherNodes, "redirectCount", redirectCount)
 
 		/*** 自分から探す ***/
 		// 使用率80%以下なら自分で処理、それ以外は他ノードとの協調で処理
 		// Weight抽選で、自分のScoreの方が高い場合は自分で処理
 		// それ以外はredirect、Max３回か、自分にリダイレクトされた場合は終了（Client側実装）
-		selfBestScore, selfRecommendDsScore := selectSelfDatasource(b.SelfNode, tarDbName, endpoint)
-		slog.Debug("[Balancer] Self best score", "selfBestScore", selfBestScore, "selfRecommendDsScore", selfRecommendDsScore)
+		selfBestScore, selfRecommendDsScore := selectSelfDatasource(r.Context(), b.SelfNode, tarDbName, endpoint)
+		global.GetCtxLogger(r.Context()).Debug("Balancer", "detail", "Self best score", "selfBestScore", selfBestScore, "selfRecommendDsScore", selfRecommendDsScore)
 		if selfRecommendDsScore != nil {
 			b.runHandler(next, w, r, selfRecommendDsScore.exIndex)
 			return
@@ -123,8 +127,8 @@ func (b *Balancer) SelectNode(next http.Handler) http.Handler {
 		}
 
 		/*** 他のノード選択 ***/
-		recommendNodeScore, recommendNode := selectOtherNode(b.OtherNodes, tarDbName, endpoint)
-		slog.Debug("[Balancer] Recommend node score", "recommendNodeScore", recommendNodeScore, "recommendNode", recommendNode)
+		recommendNodeScore, recommendNode := selectOtherNode(r.Context(), b.OtherNodes, tarDbName, endpoint)
+		global.GetCtxLogger(r.Context()).Debug("Balancer", "detail", "Recommend node score", "recommendNodeScore", recommendNodeScore, "recommendNode", recommendNode)
 		if recommendNode == nil {
 			// ゲート条件チェックは行わない
 			// DB枯渇しても、Httpバッファリングが可能な場合は処理を継続させる
@@ -149,7 +153,7 @@ func (b *Balancer) SelectNode(next http.Handler) http.Handler {
 			r.Body.Close()
 		}
 		w.Header().Set("Location", recommendNode.NodeID)
-		global.ResponseError(w, RP_REDIRECT_OTHER_NODE, fmt.Sprintf("Redirecting to other node %s from %s", recommendNode.NodeID, b.SelfNode.NodeID))
+		global.ResponseError(w, RP_RECOMMEND_OTHER_NODE, fmt.Sprintf("Redirecting to other node %s from %s", recommendNode.NodeID, b.SelfNode.NodeID))
 	}
 	return http.HandlerFunc(fn)
 }
@@ -183,9 +187,9 @@ func (b *Balancer) runHandler(next http.Handler, w http.ResponseWriter, r *http.
 // utilization is under the recommend threshold (~80%, score >= 0.45), a
 // recommended score for weighted random. Otherwise recommendScore is nil
 // (caller may still use bestScore to force local execution).
-func selectSelfDatasource(selfNode *NodeInfo, tarDbName string, endpoint ENDPOINT_TYPE) (bestScore *ScoreWithWeight, recommendScore *ScoreWithWeight) {
+func selectSelfDatasource(ctx context.Context, selfNode *NodeInfo, tarDbName string, endpoint ENDPOINT_TYPE) (bestScore *ScoreWithWeight, recommendScore *ScoreWithWeight) {
 
-	scores := selfNode.GetScore(tarDbName, endpoint)
+	scores := selfNode.GetScore(ctx, tarDbName, endpoint)
 
 	// ノード選択（TopK + Weighted Random）
 	best, bestRandom := selectBestRandomScore(scores)
@@ -206,11 +210,11 @@ func selectSelfDatasource(selfNode *NodeInfo, tarDbName string, endpoint ENDPOIN
 // It then selects one score via selectBestRandomScore and returns that
 // score and the corresponding NodeInfo. Returns nil,nil if there are no
 // candidates.
-func selectOtherNode(otherNodes []*NodeInfo, tarDbName string, endpoint ENDPOINT_TYPE) (recommendNodeScore *ScoreWithWeight, recommendNode *NodeInfo) {
+func selectOtherNode(ctx context.Context, otherNodes []*NodeInfo, tarDbName string, endpoint ENDPOINT_TYPE) (recommendNodeScore *ScoreWithWeight, recommendNode *NodeInfo) {
 	scores := make([]*ScoreWithWeight, 0, 8)
 
 	for nodeIdx, node := range otherNodes {
-		nodeScores := node.GetScore(tarDbName, endpoint)
+		nodeScores := node.GetScore(ctx, tarDbName, endpoint)
 		for _, score := range nodeScores {
 			score.exIndex = nodeIdx
 		}

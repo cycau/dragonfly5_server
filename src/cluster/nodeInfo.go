@@ -15,7 +15,7 @@
 package cluster
 
 import (
-	"log/slog"
+	"context"
 	"math"
 	"sync"
 	"time"
@@ -121,7 +121,7 @@ func (node *NodeInfo) Clone() NodeInfo {
 // It returns early with a possibly empty slice if the node is not SERVING,
 // HTTP queue is full, the datasource is inactive, or name/capacity filters fail.
 // Each returned ScoreWithWeight has score, weight, and exIndex (datasource index).
-func (node *NodeInfo) GetScore(tarDbName string, endpoint global.ENDPOINT_TYPE) []*ScoreWithWeight {
+func (node *NodeInfo) GetScore(ctx context.Context, tarDbName string, endpoint global.ENDPOINT_TYPE) []*ScoreWithWeight {
 	node.Mu.Lock()
 	defer node.Mu.Unlock()
 
@@ -163,7 +163,7 @@ func (node *NodeInfo) GetScore(tarDbName string, endpoint global.ENDPOINT_TYPE) 
 		}
 
 		scores = append(scores, &ScoreWithWeight{score: score, weight: weight, exIndex: dsIdx})
-		slog.Debug("[NodeInfo] GetScore", "dsIdx", dsIdx, "endpoint", endpoint, "score", score, "weight", weight, "dsInfo", dsInfo)
+		global.GetCtxLogger(ctx).Debug("NodeInfo", "detail", "GetScore", "dsIdx", dsIdx, "endpoint", endpoint, "score", score, "weight", weight, "dsInfo", dsInfo)
 	}
 
 	return scores

@@ -20,7 +20,6 @@ import (
 	"dragonfly5/server/global"
 	"errors"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
@@ -43,26 +42,30 @@ type TxEntry struct {
 	executing   bool
 	ExpiresAt   time.Time
 	idleTimeout *time.Duration
-	Conn        *sql.Conn
-	Tx          *sql.Tx
+	conn        *sql.Conn
+	tx          *sql.Tx
 }
 
 // QueryContext runs a read-only query in this transaction's sql.Tx.
 func (e *TxEntry) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	rows, err := e.Tx.QueryContext(ctx, query, args...)
+	rows, err := e.tx.QueryContext(ctx, query, args...)
 	return rows, err
 }
 
 // ExecContext executes a statement in this transaction's sql.Tx.
 func (e *TxEntry) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	result, err := e.Tx.ExecContext(ctx, query, args...)
+	result, err := e.tx.ExecContext(ctx, query, args...)
 	return result, err
 }
 
 // commit calls Commit on the underlying Tx. Used by DsManager.CommitTx;
 // does not remove the entry or release semaphores (caller uses CloseTx).
 func (e *TxEntry) commit() error {
-	err := e.Tx.Commit()
+	err := e.tx.Commit()
+	if err != nil {
+		return err
+	}
+	err = e.conn.Close()
 	if err != nil {
 		return err
 	}
@@ -73,7 +76,11 @@ func (e *TxEntry) commit() error {
 // and by cleanup for expired entries; does not remove entry or release
 // semaphores (caller uses CloseTx).
 func (e *TxEntry) rollback() error {
-	err := e.Tx.Rollback()
+	err := e.tx.Rollback()
+	if err != nil {
+		return err
+	}
+	err = e.conn.Close()
 	if err != nil {
 		return err
 	}
@@ -143,8 +150,7 @@ func (ds *TxDatasource) getEntry(txID string, executing bool) (*TxEntry, error) 
 		ds.semWrite.Release(1)
 
 		go func() {
-			entry.Tx.Rollback()
-			entry.Conn.Close()
+			entry.rollback()
 		}()
 		return nil, ErrTxExpired
 	}
@@ -264,10 +270,10 @@ func (dm *DsManager) allocateSemaphore(ctx context.Context, datasourceIdx int, r
 		}
 		err = ds.semWrite.Acquire(ctx, 1)
 		if err != nil {
-			ds.semTx.Release(1)
 			ds.mu.Lock()
 			ds.runningTx--
 			ds.mu.Unlock()
+			ds.semTx.Release(1)
 			return nil, global.ReturnError(err, fmt.Sprintf("Failed to acquire transaction semaphore: %v", err))
 		}
 	}
@@ -333,13 +339,13 @@ func (dm *DsManager) BeginTx(ctx context.Context, datasourceIdx int, isolationLe
 		executing:   false,
 		idleTimeout: idleTimeout,
 		ExpiresAt:   expiresAt,
-		Conn:        conn,
-		Tx:          tx,
+		conn:        conn,
+		tx:          tx,
 	}
 
 	// Register entry
 	ds.registerEntry(entry)
-	slog.Debug("Registered transaction", "txID", txID, "total entries", len(ds.entries))
+	global.GetCtxLogger(ctx).Debug("DatasourceManager", "detail", "Registered transaction", "txID", txID, "total entries", len(ds.entries))
 
 	return entry, nil
 }
@@ -372,16 +378,24 @@ func (dm *DsManager) getTx(txID string, executing bool) (entry *TxEntry, dsIdx i
 // semaphores; the client should call CloseTx afterward. Returns ErrTxNotFound
 // or DB error.
 func (dm *DsManager) CommitTx(txID string) error {
-	entry, _, err := dm.getTx(txID, false)
+	entry, dsIdx, err := dm.getTx(txID, false)
 	if err != nil {
 		return err
 	}
 
 	err = entry.commit()
-
 	if err != nil {
 		return global.ReturnError(ErrTxException, fmt.Sprintf("failed to commit transaction: %v", err))
 	}
+
+	ds := dm.dss[dsIdx]
+	ds.mu.Lock()
+	delete(ds.entries, entry.TxID)
+	ds.runningTx--
+	ds.mu.Unlock()
+
+	ds.semTx.Release(1)
+	ds.semWrite.Release(1)
 
 	return nil
 }
@@ -391,7 +405,7 @@ func (dm *DsManager) CommitTx(txID string) error {
 // semaphores; the client should call CloseTx afterward. Returns ErrTxNotFound
 // or DB error.
 func (dm *DsManager) RollbackTx(txID string) error {
-	entry, _, err := dm.getTx(txID, false)
+	entry, dsIdx, err := dm.getTx(txID, false)
 	if err != nil {
 		return err
 	}
@@ -400,6 +414,15 @@ func (dm *DsManager) RollbackTx(txID string) error {
 	if err != nil {
 		return global.ReturnError(ErrTxException, fmt.Sprintf("failed to rollback transaction: %v", err))
 	}
+
+	ds := dm.dss[dsIdx]
+	ds.mu.Lock()
+	delete(ds.entries, entry.TxID)
+	ds.runningTx--
+	ds.mu.Unlock()
+
+	ds.semTx.Release(1)
+	ds.semWrite.Release(1)
 
 	return nil
 }
@@ -411,11 +434,10 @@ func (dm *DsManager) RollbackTx(txID string) error {
 func (dm *DsManager) CloseTx(txID string) error {
 	entry, dsIdx, err := dm.getTx(txID, false)
 	if err != nil {
-		return err
+		return nil
 	}
 
 	ds := dm.dss[dsIdx]
-
 	ds.mu.Lock()
 	delete(ds.entries, entry.TxID)
 	ds.runningTx--
@@ -424,7 +446,7 @@ func (dm *DsManager) CloseTx(txID string) error {
 	ds.semTx.Release(1)
 	ds.semWrite.Release(1)
 
-	err = entry.Conn.Close()
+	err = entry.rollback()
 	if err != nil {
 		return global.ReturnError(ErrTxException, fmt.Sprintf("failed to close connection: %v", err))
 	}
@@ -572,11 +594,8 @@ func (dm *DsManager) startCleanupTicker() {
 					ds.semTx.Release(1)
 					ds.semWrite.Release(1)
 
-					go func() {
-						entry.Tx.Rollback()
-						entry.Conn.Close()
-					}()
-					slog.Debug("Cleanup expired transaction", "txID", entry.TxID, "runningTx", ds.runningTx)
+					go entry.rollback()
+					global.GetCtxLogger(context.TODO()).Debug("DatasourceManager", "detail", "Cleaned up expired transaction", "txID", entry.TxID, "runningTx", ds.runningTx)
 				}
 
 				ds.mu.Unlock()
@@ -597,8 +616,7 @@ func (dm *DsManager) Shutdown() {
 		ds.mu.Lock()
 
 		for _, entry := range ds.entries {
-			entry.Tx.Rollback()
-			entry.Conn.Close()
+			entry.rollback()
 		}
 
 		ds.Close()

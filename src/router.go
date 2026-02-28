@@ -17,8 +17,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
-	"log/slog"
 	"math/rand"
 	"net/http"
 	"sync"
@@ -31,6 +31,30 @@ import (
 	"dragonfly5/server/global"
 	"dragonfly5/server/rdb"
 )
+
+func EmbedLogger() func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		fn := func(w http.ResponseWriter, r *http.Request) {
+			scheme := "http"
+			if r.TLS != nil {
+				scheme = "https"
+			}
+			requestStr := fmt.Sprintf("%s %s://%s%s %s\" from %s", r.Method, scheme, r.Host, r.RequestURI, r.Proto, r.RemoteAddr)
+
+			logger := global.NewLogger(r.Header.Get("X-Request-Id"))
+			logger.Info("HTTP_REQ", "detail", requestStr)
+			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+			t1 := time.Now()
+			defer func() {
+				logger.Info("HTTP_RSP", "detail", requestStr, "status", ww.Status(), "bytes", ww.BytesWritten(), "duration", time.Since(t1).String())
+			}()
+
+			ctx := context.WithValue(r.Context(), global.CTX_LOGGER, logger)
+			next.ServeHTTP(ww, r.WithContext(ctx))
+		}
+		return http.HandlerFunc(fn)
+	}
+}
 
 type Router struct {
 	chi.Router
@@ -46,7 +70,7 @@ type Router struct {
 // registers all routes via setupRoutes, and returns the configured Router.
 func NewRouter(balancer *cluster.Balancer, dsManager *rdb.DsManager) *Router {
 	r := chi.NewRouter()
-	r.Use(middleware.Logger)
+	r.Use(EmbedLogger())
 	r.Use(middleware.Recoverer)
 	r.Use(balancer.SelectNode)
 
@@ -108,6 +132,8 @@ const HEALZ_ERROR_INTERVAL = 15 * time.Second
 // datasource stats (running read/write/tx counts and DmlHandler latency/error/
 // timeout rates) from dsManager and dmlHandler.
 func (r *Router) collectHealth(isSync bool) {
+	logger := global.GetCtxLogger(context.TODO())
+
 	var wg sync.WaitGroup
 	for _, node := range r.balancer.OtherNodes {
 		wg.Add(1)
@@ -125,14 +151,14 @@ func (r *Router) collectHealth(isSync bool) {
 			defer cancel()
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, node.BaseURL+"/healz", nil)
 			if err != nil {
-				slog.Warn("[Router] Failed to create request for health", "nodeId", node.NodeID, "err", err)
+				logger.Warn("Router", "detail", "Failed to create request for health", "nodeId", node.NodeID, "err", err)
 				node.Mu.Lock()
 				node.Status = cluster.HEALZERR
 				return
 			}
 			response, err := http.DefaultClient.Do(req)
 			if err != nil {
-				slog.Warn("[Router] Failed to do request for health", "nodeId", node.NodeID, "err", err)
+				logger.Warn("Router", "detail", "Failed to do request for health", "nodeId", node.NodeID, "err", err)
 				node.Mu.Lock()
 				node.Status = cluster.HEALZERR
 				node.CheckTime = time.Now()
@@ -141,7 +167,7 @@ func (r *Router) collectHealth(isSync bool) {
 			defer response.Body.Close()
 			body, err := io.ReadAll(response.Body)
 			if err != nil {
-				slog.Warn("[Router] Failed to read response body for health", "nodeId", node.NodeID, "err", err)
+				logger.Warn("Router", "detail", "Failed to read response body for health", "nodeId", node.NodeID, "err", err)
 				node.Mu.Lock()
 				node.Status = cluster.HEALZERR
 				return
@@ -149,7 +175,7 @@ func (r *Router) collectHealth(isSync bool) {
 			var responsedNodeInfo cluster.NodeInfo
 			err = json.Unmarshal(body, &responsedNodeInfo)
 			if err != nil {
-				slog.Warn("[Router] Failed to unmarshal health info", "nodeId", node.NodeID, "err", err)
+				logger.Warn("Router", "detail", "Failed to unmarshal health info", "nodeId", node.NodeID, "err", err)
 				node.Mu.Lock()
 				node.Status = cluster.HEALZERR
 				return
@@ -187,7 +213,7 @@ func (r *Router) collectHealth(isSync bool) {
 		dsInfo.ErrorRate1m = errorRate1m
 		dsInfo.TimeoutRate1m = timeoutRate1m
 
-		slog.Debug("[Router] Self node datasource stats", "dsIdx", dsIdx, "runningHttp", selfNode.RunningHttp, "runningRead", runningRead, "runningWrite", runningWrite, "runningTx", runningTx, "latencyP95Ms", latencyP95Ms, "errorRate1m", errorRate1m, "timeoutRate1m", timeoutRate1m)
+		logger.Debug("Router", "detail", "Self node datasource stats", "dsIdx", dsIdx, "runningHttp", selfNode.RunningHttp, "runningRead", runningRead, "runningWrite", runningWrite, "runningTx", runningTx, "latencyP95Ms", latencyP95Ms, "errorRate1m", errorRate1m, "timeoutRate1m", timeoutRate1m)
 	}
 	selfNode.CheckTime = time.Now()
 	selfNode.Mu.Unlock()
