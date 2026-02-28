@@ -129,12 +129,12 @@ func (l *Logger) Error(msg string, args ...any) {
 }
 
 // NewLogger creates a new Logger.
-func NewLogger(traceId string) *Logger {
-	if traceId == "" {
-		traceId, _ = gonanoid.New(9)
-		traceId = "D5" + traceId
+func NewLogger(requestId string) *Logger {
+	if requestId == "" {
+		requestId, _ = gonanoid.New(9)
+		requestId = "D5" + requestId
 	}
-	return &Logger{requestId: traceId}
+	return &Logger{requestId: requestId}
 }
 
 // GetCtxLogger returns the Logger stored in the request context.
