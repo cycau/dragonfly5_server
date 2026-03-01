@@ -78,7 +78,7 @@ func NewDatasource(config global.DatasourceConfig) (*Datasource, error) {
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		global.GetCtxLogger(ctx).Error("DatasourceBase", "detail", "Failed to ping datasource", "datasourceId", config.DatasourceID, "err", err)
-		return nil, ErrDsException
+		return nil, err
 	}
 
 	return &Datasource{
