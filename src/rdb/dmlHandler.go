@@ -136,14 +136,14 @@ func NewDmlHandler(dsManager *DsManager) *DmlHandler {
 func (dh *DmlHandler) Query(w http.ResponseWriter, r *http.Request) {
 	dsIDX, ok := GetCtxDsIdx(r)
 	if !ok {
-		ResponseError(w, RP_BAD_REQUEST, "Datasource INDEX hasn't decided by Balancer")
+		ResponseError(w, r, RP_BAD_REQUEST, "Datasource INDEX hasn't decided by Balancer")
 		return
 	}
 
 	startTime := time.Now()
 	req, parameters, err := dh.parseRequest(r)
 	if err != nil {
-		ResponseError(w, RP_BAD_REQUEST, err.Error())
+		ResponseError(w, r, RP_BAD_REQUEST, err.Error())
 		return
 	}
 
@@ -156,22 +156,22 @@ func (dh *DmlHandler) Query(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if err == ErrDsNotFound {
-			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Datasource not found for Query")
+			ResponseError(w, r, RP_DATASOURCE_NOT_FOUND, "Datasource not found for Query")
 			return
 		}
 		if err == context.DeadlineExceeded {
 			dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
-			ResponseError(w, RP_CLIENT_CANCELLED, "Request timeout for Query")
+			ResponseError(w, r, RP_CLIENT_CANCELLED, "Request timeout for Query")
 			return
 		}
 		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
-		ResponseError(w, RP_DATASOURCE_EXCEPTION, err.Error())
+		ResponseError(w, r, RP_DATASOURCE_EXCEPTION, err.Error())
 		return
 	}
 	defer rows.Close()
 
 	if err := dh.responseQueryResult(w, rows, req.LimitRows, startTime); err != nil {
-		ResponseError(w, RP_SERVER_EXCEPTION, err.Error())
+		ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
 		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
 		return
 	}
@@ -186,14 +186,14 @@ func (dh *DmlHandler) Query(w http.ResponseWriter, r *http.Request) {
 func (dh *DmlHandler) QueryTx(w http.ResponseWriter, r *http.Request) {
 	txID := r.Header.Get(HEADER_TX_ID)
 	if txID == "" {
-		ResponseError(w, RP_BAD_REQUEST, "TxID is required")
+		ResponseError(w, r, RP_BAD_REQUEST, "TxID is required")
 		return
 	}
 
 	startTime := time.Now()
 	req, parameters, err := dh.parseRequest(r)
 	if err != nil {
-		ResponseError(w, RP_BAD_REQUEST, err.Error())
+		ResponseError(w, r, RP_BAD_REQUEST, err.Error())
 		return
 	}
 
@@ -206,26 +206,26 @@ func (dh *DmlHandler) QueryTx(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if err == ErrDsNotFound {
-			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Datasource not found for QueryTx")
+			ResponseError(w, r, RP_DATASOURCE_NOT_FOUND, "Datasource not found for QueryTx")
 			return
 		}
 		if err == ErrTxNotFound {
-			ResponseError(w, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for QueryTx")
+			ResponseError(w, r, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for QueryTx")
 			return
 		}
 		if err == context.DeadlineExceeded {
 			dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
-			ResponseError(w, RP_CLIENT_CANCELLED, "Request timeout for QueryTx")
+			ResponseError(w, r, RP_CLIENT_CANCELLED, "Request timeout for QueryTx")
 			return
 		}
 		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
-		ResponseError(w, RP_DATASOURCE_EXCEPTION, err.Error())
+		global.ResponseError(w, r, RP_DATASOURCE_EXCEPTION, err.Error())
 		return
 	}
 	defer rows.Close()
 
 	if err := dh.responseQueryResult(w, rows, req.LimitRows, startTime); err != nil {
-		ResponseError(w, RP_SERVER_EXCEPTION, err.Error())
+		ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
 		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
 		return
 	}
@@ -332,14 +332,14 @@ func (dh *DmlHandler) responseQueryResult(w http.ResponseWriter, rows *sql.Rows,
 func (dh *DmlHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	dsIDX, ok := GetCtxDsIdx(r)
 	if !ok {
-		ResponseError(w, RP_BAD_REQUEST, "Datasource INDEX hasn't decided by Balancer")
+		ResponseError(w, r, RP_BAD_REQUEST, "Datasource INDEX hasn't decided by Balancer")
 		return
 	}
 
 	startTime := time.Now()
 	req, parameters, err := dh.parseRequest(r)
 	if err != nil {
-		ResponseError(w, RP_BAD_REQUEST, err.Error())
+		ResponseError(w, r, RP_BAD_REQUEST, err.Error())
 		return
 	}
 	global.GetCtxLogger(r.Context()).Debug("DmlHandler", "detail", "Executing Execute", "dsIDX", dsIDX, "sql", req.SQL, "params", parameters)
@@ -351,23 +351,23 @@ func (dh *DmlHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if err == ErrDsNotFound {
-			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Datasource not found for Execute")
+			ResponseError(w, r, RP_DATASOURCE_NOT_FOUND, "Datasource not found for Execute")
 			return
 		}
 		if err == context.DeadlineExceeded {
 			dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
-			ResponseError(w, RP_CLIENT_CANCELLED, "Request timeout for Execute")
+			ResponseError(w, r, RP_CLIENT_CANCELLED, "Request timeout for Execute")
 			return
 		}
 		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
-		ResponseError(w, RP_DATASOURCE_EXCEPTION, err.Error())
+		ResponseError(w, r, RP_DATASOURCE_EXCEPTION, err.Error())
 		return
 	}
 
 	// Get affected rows
 	affectedRows, err := result.RowsAffected()
 	if err != nil {
-		ResponseError(w, RP_SERVER_EXCEPTION, err.Error())
+		ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
 		return
 	}
 
@@ -393,7 +393,7 @@ func (dh *DmlHandler) Execute(w http.ResponseWriter, r *http.Request) {
 func (dh *DmlHandler) ExecuteTx(w http.ResponseWriter, r *http.Request) {
 	txID := r.Header.Get(HEADER_TX_ID)
 	if txID == "" {
-		ResponseError(w, RP_BAD_REQUEST, "TxID is required")
+		ResponseError(w, r, RP_BAD_REQUEST, "TxID is required")
 		return
 	}
 
@@ -401,7 +401,7 @@ func (dh *DmlHandler) ExecuteTx(w http.ResponseWriter, r *http.Request) {
 
 	req, parameters, err := dh.parseRequest(r)
 	if err != nil {
-		ResponseError(w, RP_BAD_REQUEST, err.Error())
+		ResponseError(w, r, RP_BAD_REQUEST, err.Error())
 		return
 	}
 	global.GetCtxLogger(r.Context()).Debug("DmlHandler", "detail", "Executing ExecuteTx", "txID", txID, "sql", req.SQL, "params", parameters)
@@ -413,27 +413,27 @@ func (dh *DmlHandler) ExecuteTx(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if err == ErrDsNotFound {
-			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Datasource not found for ExecuteTx")
+			ResponseError(w, r, RP_DATASOURCE_NOT_FOUND, "Datasource not found for ExecuteTx")
 			return
 		}
 		if err == ErrTxNotFound {
-			ResponseError(w, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for ExecuteTx")
+			ResponseError(w, r, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for ExecuteTx")
 			return
 		}
 		if err == context.DeadlineExceeded {
 			dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
-			ResponseError(w, RP_CLIENT_CANCELLED, "Request timeout for ExecuteTx")
+			ResponseError(w, r, RP_CLIENT_CANCELLED, "Request timeout for ExecuteTx")
 			return
 		}
 		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
-		ResponseError(w, RP_DATASOURCE_EXCEPTION, err.Error())
+		ResponseError(w, r, RP_DATASOURCE_EXCEPTION, err.Error())
 		return
 	}
 
 	// Get affected rows
 	affectedRows, err := result.RowsAffected()
 	if err != nil {
-		ResponseError(w, RP_SERVER_EXCEPTION, err.Error())
+		ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
 		return
 	}
 

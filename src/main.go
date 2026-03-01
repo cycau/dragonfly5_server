@@ -125,7 +125,7 @@ func runServer(config global.Config) {
 		maxHttpQueue = 1000 // default
 	}
 
-	nodeId, _ := gonanoid.New(9)
+	nodeId, _ := gonanoid.Generate(global.ALPHA_NUM, 6)
 	thisNode := &cluster.NodeInfo{
 		NodeID:       fmt.Sprintf("%s-%s", config.NodeName, nodeId),
 		Status:       cluster.STARTING,

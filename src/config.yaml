@@ -1,5 +1,5 @@
 nodeName: "dbapi-1"
-nodePort: 5678
+nodePort: 5679
 maxHttpQueue: 10000
 secretKey: "secret-key"
 
@@ -21,7 +21,7 @@ myDatasources:
     databaseName: crm-system
     driver: postgres # postgres, mysql
     dsn: "postgres://admin:abcd1234@localhost:5432/lps?sslmode=disable"
-    maxConns: 20
+    maxConns: 10
     maxWriteConns: 10
     minWriteConns: 4
     maxConnLifetimeSec: 1800
@@ -31,7 +31,7 @@ myDatasources:
     databaseName: crm-system
     driver: postgres
     dsn: "postgres://admin:abcd1234@localhost:5432/lps?sslmode=disable"
-    maxConns: 20
+    maxConns: 10
     maxWriteConns: 10
     minWriteConns: 4
     maxConnLifetimeSec: 1800

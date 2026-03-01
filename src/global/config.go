@@ -128,10 +128,12 @@ func (l *Logger) Error(msg string, args ...any) {
 	slog.Error(l.requestId, append([]any{"spot", msg}, args...)...)
 }
 
+const ALPHA_NUM = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
 // NewLogger creates a new Logger.
 func NewLogger(requestId string) *Logger {
 	if requestId == "" {
-		requestId, _ = gonanoid.New(9)
+		requestId, _ = gonanoid.Generate(ALPHA_NUM, 10)
 		requestId = "D5" + requestId
 	}
 	return &Logger{requestId: requestId}

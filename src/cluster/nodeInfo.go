@@ -127,24 +127,27 @@ func (node *NodeInfo) GetScore(ctx context.Context, tarDbName string, endpoint g
 
 	scores := make([]*ScoreWithWeight, 0, len(node.Datasources))
 
-	for dsIdx := range node.Datasources {
-		if node.Status != SERVING {
-			return scores
-		}
-		if node.RunningHttp >= node.MaxHttpQueue {
-			return scores
-		}
+	if node.Status != SERVING {
+		return scores
+	}
+	if node.RunningHttp >= node.MaxHttpQueue {
+		return scores
+	}
 
+	for dsIdx := range node.Datasources {
 		dsInfo := &node.Datasources[dsIdx]
 
 		if !dsInfo.Active {
-			return scores
+			continue
 		}
-		if dsInfo.MaxWriteConns < 1 && (endpoint == global.EP_Execute || endpoint == global.EP_BeginTx) {
-			return scores
+		if endpoint == global.EP_Query && (dsInfo.MaxConns-dsInfo.MinWriteConns < 1) {
+			continue
+		}
+		if (endpoint == global.EP_Execute || endpoint == global.EP_BeginTx) && dsInfo.MaxWriteConns < 1 {
+			continue
 		}
 		if dsInfo.DatabaseName != tarDbName {
-			return scores
+			continue
 		}
 
 		m := calculateMetrics(node, dsInfo)

@@ -64,7 +64,7 @@ func NewTxHandler(dsManager *DsManager) *TxHandler {
 func (th *TxHandler) BeginTx(w http.ResponseWriter, r *http.Request) {
 	dsIDX, req, isolationLevel, err := th.parseBeginRequest(r)
 	if err != nil {
-		ResponseError(w, RP_BAD_REQUEST, err.Error())
+		ResponseError(w, r, RP_BAD_REQUEST, err.Error())
 		return
 	}
 
@@ -74,10 +74,10 @@ func (th *TxHandler) BeginTx(w http.ResponseWriter, r *http.Request) {
 	txEntry, err := th.dsManager.BeginTx(r.Context(), dsIDX, isolationLevel, req.MaxTxTimeoutSec)
 	if err != nil {
 		if err == context.DeadlineExceeded {
-			ResponseError(w, RP_CLIENT_CANCELLED, "Request timeout for BeginTx")
+			ResponseError(w, r, RP_CLIENT_CANCELLED, "Request timeout for BeginTx")
 			return
 		}
-		ResponseError(w, RP_DATASOURCE_EXCEPTION, err.Error())
+		ResponseError(w, r, RP_DATASOURCE_EXCEPTION, err.Error())
 		return
 	}
 
@@ -100,7 +100,7 @@ func (th *TxHandler) CommitTx(w http.ResponseWriter, r *http.Request) {
 	txID := getTxID(r)
 
 	if txID == "" {
-		ResponseError(w, RP_BAD_REQUEST, "TxId is required")
+		ResponseError(w, r, RP_BAD_REQUEST, "TxId is required")
 		return
 	}
 
@@ -110,18 +110,18 @@ func (th *TxHandler) CommitTx(w http.ResponseWriter, r *http.Request) {
 	err := th.dsManager.CommitTx(txID)
 	if err != nil {
 		if err == ErrDsNotFound {
-			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Datasource not found for CommitTx")
+			ResponseError(w, r, RP_DATASOURCE_NOT_FOUND, "Datasource not found for CommitTx")
 			return
 		}
 		if err == ErrTxNotFound {
-			ResponseError(w, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for CommitTx")
+			ResponseError(w, r, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for CommitTx")
 			return
 		}
 		if err == context.DeadlineExceeded {
-			ResponseError(w, RP_CLIENT_CANCELLED, "Request timeout for CommitTx")
+			ResponseError(w, r, RP_CLIENT_CANCELLED, "Request timeout for CommitTx")
 			return
 		}
-		ResponseError(w, RP_DATASOURCE_EXCEPTION, err.Error())
+		ResponseError(w, r, RP_DATASOURCE_EXCEPTION, err.Error())
 		return
 	}
 
@@ -143,7 +143,7 @@ func (th *TxHandler) RollbackTx(w http.ResponseWriter, r *http.Request) {
 	txID := getTxID(r)
 
 	if txID == "" {
-		ResponseError(w, RP_BAD_REQUEST, "TxId is required")
+		ResponseError(w, r, RP_BAD_REQUEST, "TxId is required")
 		return
 	}
 
@@ -153,18 +153,18 @@ func (th *TxHandler) RollbackTx(w http.ResponseWriter, r *http.Request) {
 	err := th.dsManager.RollbackTx(txID)
 	if err != nil {
 		if err == ErrDsNotFound {
-			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Datasource not found for RollbackTx")
+			ResponseError(w, r, RP_DATASOURCE_NOT_FOUND, "Datasource not found for RollbackTx")
 			return
 		}
 		if err == ErrTxNotFound {
-			ResponseError(w, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for RollbackTx")
+			ResponseError(w, r, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for RollbackTx")
 			return
 		}
 		if err == context.DeadlineExceeded {
-			ResponseError(w, RP_CLIENT_CANCELLED, "Request timeout for RollbackTx")
+			ResponseError(w, r, RP_CLIENT_CANCELLED, "Request timeout for RollbackTx")
 			return
 		}
-		ResponseError(w, RP_DATASOURCE_EXCEPTION, err.Error())
+		ResponseError(w, r, RP_DATASOURCE_EXCEPTION, err.Error())
 		return
 	}
 
@@ -187,7 +187,7 @@ func (th *TxHandler) CloseTx(w http.ResponseWriter, r *http.Request) {
 	txID := getTxID(r)
 
 	if txID == "" {
-		ResponseError(w, RP_BAD_REQUEST, "TxId is required")
+		ResponseError(w, r, RP_BAD_REQUEST, "TxId is required")
 		return
 	}
 
@@ -197,18 +197,18 @@ func (th *TxHandler) CloseTx(w http.ResponseWriter, r *http.Request) {
 	err := th.dsManager.CloseTx(txID)
 	if err != nil {
 		if err == ErrDsNotFound {
-			ResponseError(w, RP_DATASOURCE_NOT_FOUND, "Datasource not found for CloseTx")
+			ResponseError(w, r, RP_DATASOURCE_NOT_FOUND, "Datasource not found for CloseTx")
 			return
 		}
 		if err == ErrTxNotFound {
-			ResponseError(w, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for CloseTx")
+			ResponseError(w, r, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for CloseTx")
 			return
 		}
 		if err == context.DeadlineExceeded {
-			ResponseError(w, RP_CLIENT_CANCELLED, "Request timeout for CloseTx")
+			ResponseError(w, r, RP_CLIENT_CANCELLED, "Request timeout for CloseTx")
 			return
 		}
-		ResponseError(w, RP_DATASOURCE_EXCEPTION, err.Error())
+		ResponseError(w, r, RP_DATASOURCE_EXCEPTION, err.Error())
 		return
 	}
 
