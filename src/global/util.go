@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -155,7 +154,7 @@ var (
 // ResponseError sends a JSON error response with the given HTTP status code.
 // The body is {"error": {"code": code, "message": message}}. Content-Type
 // is set to application/json; charset=utf-8.
-func ResponseError(w http.ResponseWriter, responseCode *ResponseCode, message string) {
+func ResponseError(w http.ResponseWriter, r *http.Request, responseCode *ResponseCode, message string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(responseCode.httpCode)
 
@@ -166,12 +165,6 @@ func ResponseError(w http.ResponseWriter, responseCode *ResponseCode, message st
 		},
 	}
 
-	slog.Error("ResponseError", "message", message)
+	GetCtxLogger(r.Context()).Error("ResponseError", "detail", message)
 	json.NewEncoder(w).Encode(errorResp)
-}
-
-// ReturnError wraps an error with a message and logs it
-func ReturnError(err error, message string) error {
-	slog.Error("ReturnError", "message", message)
-	return err
 }

@@ -61,13 +61,13 @@ func (b *Balancer) SelectNode(next http.Handler) http.Handler {
 		}
 		secretKey := r.Header.Get(HEADER_SECRET_KEY)
 		if secretKey != b.SelfNode.SecretKey {
-			global.ResponseError(w, RP_UNAUTHORIZED, "Unauthorized")
+			global.ResponseError(w, r, RP_UNAUTHORIZED, "Unauthorized")
 			return
 		}
 
 		err, endpoint, tarDbName, txID, redirectCount := parseRequest(r)
 		if err != nil {
-			global.ResponseError(w, RP_BAD_REQUEST, err.Error())
+			global.ResponseError(w, r, RP_BAD_REQUEST, err.Error())
 			return
 		}
 
@@ -75,7 +75,7 @@ func (b *Balancer) SelectNode(next http.Handler) http.Handler {
 		b.SelfNode.Mu.Lock()
 		if b.SelfNode.RunningHttp >= b.SelfNode.MaxHttpQueue {
 			b.SelfNode.Mu.Unlock()
-			global.ResponseError(w, RP_DATASOURCE_UNAVAILABLE, fmt.Sprintf("No resource to process on this node. Node[%s], RunningHttp[%d]", b.SelfNode.NodeID, b.SelfNode.RunningHttp))
+			global.ResponseError(w, r, RP_DATASOURCE_UNAVAILABLE, fmt.Sprintf("No resource to process on this node. Node[%s], RunningHttp[%d]", b.SelfNode.NodeID, b.SelfNode.RunningHttp))
 			return
 		}
 		b.SelfNode.RunningHttp++
@@ -119,7 +119,7 @@ func (b *Balancer) SelectNode(next http.Handler) http.Handler {
 		// Client側で、最後のリダイレクトの場合（リダイレクトを受け付けない場合）
 		if redirectCount < 1 {
 			if selfBestScore == nil {
-				global.ResponseError(w, RP_DATASOURCE_UNAVAILABLE, fmt.Sprintf("No resource to process on this node. Node[%s], RedirectCount[%d]", b.SelfNode.NodeID, redirectCount))
+				global.ResponseError(w, r, RP_DATASOURCE_UNAVAILABLE, fmt.Sprintf("No resource to process on this node. Node[%s], RedirectCount[%d]", b.SelfNode.NodeID, redirectCount))
 				return
 			}
 			b.runHandler(next, w, r, selfBestScore.exIndex)
@@ -136,7 +136,7 @@ func (b *Balancer) SelectNode(next http.Handler) http.Handler {
 				b.runHandler(next, w, r, selfBestScore.exIndex)
 				return
 			}
-			global.ResponseError(w, RP_DATASOURCE_UNAVAILABLE, "No candidate nodes available and no capacity to process locally")
+			global.ResponseError(w, r, RP_DATASOURCE_UNAVAILABLE, "No candidate nodes available and no capacity to process locally")
 			return
 		}
 
@@ -153,7 +153,7 @@ func (b *Balancer) SelectNode(next http.Handler) http.Handler {
 			r.Body.Close()
 		}
 		w.Header().Set("Location", recommendNode.NodeID)
-		global.ResponseError(w, RP_RECOMMEND_OTHER_NODE, fmt.Sprintf("Redirecting to other node %s from %s", recommendNode.NodeID, b.SelfNode.NodeID))
+		global.ResponseError(w, r, RP_RECOMMEND_OTHER_NODE, fmt.Sprintf("Redirecting to other node %s from %s", recommendNode.NodeID, b.SelfNode.NodeID))
 	}
 	return http.HandlerFunc(fn)
 }

@@ -19,7 +19,6 @@ import (
 	"database/sql"
 	"dragonfly5/server/global"
 	"errors"
-	"fmt"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -55,14 +54,16 @@ func NewDatasource(config global.DatasourceConfig) (*Datasource, error) {
 	if driverName == "pgx" {
 		connConfig, err := pgx.ParseConfig(config.DSN)
 		if err != nil {
-			return nil, global.ReturnError(ErrDsException, fmt.Sprintf("Failed to parse pgx config for %s: %v", config.DatasourceID, err))
+			global.GetCtxLogger(ctx).Error("DatasourceBase", "detail", "Failed to parse pgx config", "datasourceId", config.DatasourceID, "err", err)
+			return nil, ErrDsException
 		}
 		db = sql.OpenDB(stdlib.GetConnector(*connConfig))
 	} else {
 		var err error
 		db, err = sql.Open(driverName, config.DSN)
 		if err != nil {
-			return nil, global.ReturnError(ErrDsException, fmt.Sprintf("Failed to open datasource %s: %v", config.DatasourceID, err))
+			global.GetCtxLogger(ctx).Error("DatasourceBase", "detail", "Failed to open datasource", "datasourceId", config.DatasourceID, "err", err)
+			return nil, ErrDsException
 		}
 	}
 
@@ -76,7 +77,8 @@ func NewDatasource(config global.DatasourceConfig) (*Datasource, error) {
 	// Ping to verify connection
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
-		return nil, global.ReturnError(err, fmt.Sprintf("Failed to ping datasource %s", config.DatasourceID))
+		global.GetCtxLogger(ctx).Error("DatasourceBase", "detail", "Failed to ping datasource", "datasourceId", config.DatasourceID, "err", err)
+		return nil, err
 	}
 
 	return &Datasource{
