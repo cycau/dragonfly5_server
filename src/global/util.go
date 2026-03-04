@@ -159,10 +159,8 @@ func ResponseError(w http.ResponseWriter, r *http.Request, responseCode *Respons
 	w.WriteHeader(responseCode.httpCode)
 
 	errorResp := map[string]any{
-		"error": map[string]any{
-			"msgcode": responseCode.msgcode,
-			"message": message,
-		},
+		"errcode": responseCode.msgcode,
+		"message": message,
 	}
 
 	GetCtxLogger(r.Context()).Error("ResponseError", "detail", message)
