@@ -1,0 +1,30 @@
+
+CREATE TABLE d5_api_define (
+    nanoid,
+    name,
+    path,
+    description,
+);
+CREATE TABLE d5_func_define (
+    nanoid,
+    name,
+    api_id,
+    allowed_groups
+    allowed_roles
+);
+CREATE TABLE d5_sql_define ( // input user_id & groups & role
+    nanoid,
+    name,
+    func_id,
+    dml_type, // select, update, delete
+    sql,
+    parames,
+    check_privilege, // must contain column user_id when select. when update, delete must select once and contain owner's user_id
+    description
+);
+
+CREATE TABLE d5_work_flow (
+);
+
+// audit
+// final stage. d5_db_explorer
