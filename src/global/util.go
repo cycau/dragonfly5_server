@@ -83,7 +83,7 @@ func (g *TxIDGenerator) Generate(datasourceIndex int) (txID string, err error) {
 	payload[offset] = uint8(datasourceIndex)
 	offset += datasourceIndexSize
 
-	// randomBytes: 5 bytes, and also used for security
+	// randomBytes: 6 bytes, and also used for security
 	randomBytes := make([]byte, randomSize)
 	if _, err := rand.Read(randomBytes); err != nil {
 		// This should almost never happen, but if it does, return an error
