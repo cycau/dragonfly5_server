@@ -1,0 +1,65 @@
+CREATE TABLE d5_member (
+    id VARCHAR(20) PRIMARY KEY,
+    user_role VARCHAR(8),
+    email VARCHAR(100),
+    email_verified BOOLEAN,
+    status VARCHAR(4),
+    password VARCHAR(200),
+    nickname VARCHAR(100),
+    avatar VARCHAR(200),
+    allowed_wrong_time INT, // random 3 ~ 7 - prev_locked_count, when wrong to set
+    lock_until TIMESTAMPTZ, // one huour, when wrong to set
+    prev_locked_count INT,  // 2^prev_locked_count 5min
+    last_logged_in_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ
+);
+CREATE TABLE d5_back_user (
+    id VARCHAR(20) PRIMARY KEY,
+    user_role VARCHAR(8),
+    email VARCHAR(100),
+    email_verified BOOLEAN,
+    status VARCHAR(4),
+    password VARCHAR(200),
+    nickname VARCHAR(100),
+    avatar VARCHAR(200),
+    allowed_wrong_time INT, // random 3 ~ 7 - prev_locked_count, when wrong to set
+    lock_until TIMESTAMPTZ, // one huour, when wrong to set
+    prev_locked_count INT,  // 2^prev_locked_count 5min
+    last_logged_in_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ
+);
+CREATE TABLE d5_user_oauth (
+    oauth_id VARCHAR(32) PRIMARY KEY,
+    oauth_name VARCHAR(8) PRIMARY KEY, // github ...
+    member_id VARCHAR(20),
+    status VARCHAR(4),
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ
+);
+CREATE TABLE d5_refresh_token (
+);
+CREATE TABLE d5_secret_key (
+);
+CREATE TABLE d5_user_role (
+    name DEFAULT 'member',
+    description
+);
+CREATE TABLE d5_user_role_group (
+    name DEFAULT 'member',
+    affiliated_group
+    group_data_r
+    group_data_w
+    group_data_d
+);
+CREATE TABLE d5_user_group (
+    name DEFAULT 'general ',
+    allowed_ip_name DEFAULT '*',
+);
+CREATE TABLE d5_ip_define (
+    nanoid
+    name,
+    allowed_ips,
+    description
+);

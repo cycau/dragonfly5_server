@@ -83,7 +83,7 @@ func (g *TxIDGenerator) Generate(datasourceIndex int) (txID string, err error) {
 	payload[offset] = uint8(datasourceIndex)
 	offset += datasourceIndexSize
 
-	// randomBytes: 5 bytes, and also used for security
+	// randomBytes: 6 bytes, and also used for security
 	randomBytes := make([]byte, randomSize)
 	if _, err := rand.Read(randomBytes); err != nil {
 		// This should almost never happen, but if it does, return an error
@@ -159,10 +159,8 @@ func ResponseError(w http.ResponseWriter, r *http.Request, responseCode *Respons
 	w.WriteHeader(responseCode.httpCode)
 
 	errorResp := map[string]any{
-		"error": map[string]any{
-			"msgcode": responseCode.msgcode,
-			"message": message,
-		},
+		"errcode": responseCode.msgcode,
+		"message": message,
 	}
 
 	GetCtxLogger(r.Context()).Error("ResponseError", "detail", message)

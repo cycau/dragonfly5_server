@@ -40,6 +40,7 @@ type RequestParams struct {
 	SQL        string       `json:"sql"`
 	Params     []ParamValue `json:"params,omitempty"`
 	TimeoutSec int          `json:"timeoutSec,omitempty"`
+	OffsetRows int          `json:"offsetRows,omitempty"`
 	LimitRows  int          `json:"limitRows,omitempty"`
 }
 
@@ -103,6 +104,8 @@ type DmlHandler struct {
 	dsManager  *DsManager
 	statsInfos []*StatsInfo
 }
+
+var slimResponseMode = false
 
 // NewDmlHandler constructs a DmlHandler that uses the given DsManager and
 // allocates one StatsInfo per datasource. Each StatsInfo has a Prometheus
@@ -170,7 +173,13 @@ func (dh *DmlHandler) Query(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	if err := dh.responseQueryResult(w, rows, req.LimitRows, startTime); err != nil {
+	if slimResponseMode {
+		if err := responseQueryResultSlim(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
+			ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
+		}
+		return
+	}
+	if err := dh.responseQueryResult(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
 		ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
 		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
 		return
@@ -224,7 +233,13 @@ func (dh *DmlHandler) QueryTx(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	if err := dh.responseQueryResult(w, rows, req.LimitRows, startTime); err != nil {
+	if slimResponseMode {
+		if err := responseQueryResultSlim(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
+			ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
+		}
+		return
+	}
+	if err := dh.responseQueryResult(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
 		ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
 		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
 		return
@@ -237,7 +252,7 @@ func (dh *DmlHandler) QueryTx(w http.ResponseWriter, r *http.Request) {
 // metadata and JSON-serializable row values ([]byte→base64, time→RFC3339,
 // decimal→string), and writes a QueryResponse (meta, rows, totalCount,
 // elapsedTimeUs) as JSON. Returns an error on column/scan/iteration failure.
-func (dh *DmlHandler) responseQueryResult(w http.ResponseWriter, rows *sql.Rows, limitRows int, startTime time.Time) error {
+func (dh *DmlHandler) responseQueryResult(w http.ResponseWriter, rows *sql.Rows, offsetRows int, limitRows int, startTime time.Time) error {
 
 	// Get column information
 	columns, err := rows.Columns()
@@ -261,17 +276,21 @@ func (dh *DmlHandler) responseQueryResult(w http.ResponseWriter, rows *sql.Rows,
 		}
 	}
 
+	offset := offsetRows + 1
 	limit := math.MaxInt32
 	if limitRows > 0 {
-		limit = limitRows
+		limit = offset + limitRows
 	}
 
 	// Read rows
 	var resultRows []any
 	rowCount := 0
 	for rows.Next() {
+		rowCount++
+		if rowCount < offset {
+			continue
+		}
 		if rowCount >= limit {
-			rowCount++
 			continue
 		}
 
@@ -304,7 +323,6 @@ func (dh *DmlHandler) responseQueryResult(w http.ResponseWriter, rows *sql.Rows,
 		}
 
 		resultRows = append(resultRows, values)
-		rowCount++
 	}
 
 	if err := rows.Err(); err != nil {
