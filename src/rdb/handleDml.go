@@ -105,8 +105,6 @@ type DmlHandler struct {
 	statsInfos []*StatsInfo
 }
 
-var slimResponseMode = false
-
 // NewDmlHandler constructs a DmlHandler that uses the given DsManager and
 // allocates one StatsInfo per datasource. Each StatsInfo has a Prometheus
 // summary for p95 latency and rate counters (STAT_WINDOW_INTERVAL) for
@@ -173,7 +171,7 @@ func (dh *DmlHandler) Query(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	if slimResponseMode {
+	if SLIM_RESPONSE_MODE {
 		if err := responseQueryResultSlim(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
 			ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
 		}
@@ -233,7 +231,7 @@ func (dh *DmlHandler) QueryTx(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	if slimResponseMode {
+	if SLIM_RESPONSE_MODE {
 		if err := responseQueryResultSlim(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
 			ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
 		}
