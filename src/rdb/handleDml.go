@@ -16,7 +16,6 @@ package rdb
 
 import (
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -171,13 +170,7 @@ func (dh *DmlHandler) Query(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	if SLIM_RESPONSE_MODE {
-		if err := responseQueryResultSlim(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
-			ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
-		}
-		return
-	}
-	if err := dh.responseQueryResult(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
+	if err := ResponseQueryResult(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
 		ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
 		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
 		return
@@ -231,114 +224,13 @@ func (dh *DmlHandler) QueryTx(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	if SLIM_RESPONSE_MODE {
-		if err := responseQueryResultSlim(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
-			ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
-		}
-		return
-	}
-	if err := dh.responseQueryResult(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
+	if err := ResponseQueryResult(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
 		ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
 		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
 		return
 	}
 
 	dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, false)
-}
-
-// responseQueryResult reads all rows (up to limitRows), builds column
-// metadata and JSON-serializable row values ([]byte→base64, time→RFC3339,
-// decimal→string), and writes a QueryResponse (meta, rows, totalCount,
-// elapsedTimeUs) as JSON. Returns an error on column/scan/iteration failure.
-func (dh *DmlHandler) responseQueryResult(w http.ResponseWriter, rows *sql.Rows, offsetRows int, limitRows int, startTime time.Time) error {
-
-	// Get column information
-	columns, err := rows.Columns()
-	if err != nil {
-		return fmt.Errorf("Failed to get columns: %w", err)
-	}
-
-	columnTypes, err := rows.ColumnTypes()
-	if err != nil {
-		return fmt.Errorf("Failed to get column types: %w", err)
-	}
-
-	// Build column metadata
-	columnMeta := make([]ColumnMeta, len(columns))
-	for i, colType := range columnTypes {
-		nullable, _ := colType.Nullable()
-		columnMeta[i] = ColumnMeta{
-			Name:     columns[i],
-			DBType:   colType.DatabaseTypeName(),
-			Nullable: nullable,
-		}
-	}
-
-	offset := offsetRows + 1
-	limit := math.MaxInt32
-	if limitRows > 0 {
-		limit = offset + limitRows
-	}
-
-	// Read rows
-	var resultRows []any
-	rowCount := 0
-	for rows.Next() {
-		rowCount++
-		if rowCount < offset {
-			continue
-		}
-		if rowCount >= limit {
-			continue
-		}
-
-		// Create slice for scanning
-		values := make([]any, len(columns))
-		valuePtrs := make([]any, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		if err := rows.Scan(valuePtrs...); err != nil {
-			return fmt.Errorf("Failed to scan row: %w", err)
-		}
-
-		for i, val := range values {
-			if val == nil {
-				continue
-			}
-
-			switch v := val.(type) {
-			case []byte:
-				values[i] = base64.StdEncoding.EncodeToString(v)
-			case time.Time:
-				values[i] = v.Format(time.RFC3339)
-			case decimal.Decimal:
-				values[i] = v.String()
-			default:
-				values[i] = v
-			}
-		}
-
-		resultRows = append(resultRows, values)
-	}
-
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("Rows iteration error: %w", err)
-	}
-
-	// Write response
-	response := QueryResponse{
-		Meta:          columnMeta,
-		Rows:          resultRows,
-		TotalCount:    rowCount,
-		ElapsedTimeUs: time.Since(startTime).Microseconds(),
-	}
-
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
-	return nil
 }
 
 // Execute handles POST /rdb/execute. The datasource index is taken from

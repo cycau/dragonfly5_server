@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -60,6 +61,87 @@ const (
 )
 
 var SLIM_RESPONSE_MODE = false
+
+func ResponseQueryResult(w http.ResponseWriter, rows *sql.Rows, offsetRows int, limitRows int, startTime time.Time) error {
+	if SLIM_RESPONSE_MODE {
+		return responseQueryResultSlim(w, rows, offsetRows, limitRows, startTime)
+	}
+	return responseQueryResultJson(w, rows, offsetRows, limitRows, startTime)
+}
+
+// responseQueryResultJson writes query results as a JSON object.
+func responseQueryResultJson(w http.ResponseWriter, rows *sql.Rows, offsetRows int, limitRows int, startTime time.Time) error {
+
+	// Get column information
+	columns, err := rows.Columns()
+	if err != nil {
+		return fmt.Errorf("Failed to get columns: %w", err)
+	}
+
+	columnTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return fmt.Errorf("Failed to get column types: %w", err)
+	}
+
+	// Build column metadata
+	columnMeta := make([]ColumnMeta, len(columns))
+	for i, colType := range columnTypes {
+		nullable, _ := colType.Nullable()
+		columnMeta[i] = ColumnMeta{
+			Name:     columns[i],
+			DBType:   colType.DatabaseTypeName(),
+			Nullable: nullable,
+		}
+	}
+
+	offset := offsetRows + 1
+	limit := math.MaxInt32
+	if limitRows > 0 {
+		limit = offset + limitRows
+	}
+
+	// Create slice for scanning
+	values := make([]any, len(columns))
+	valuePtrs := make([]any, len(columns))
+	for i := range values {
+		valuePtrs[i] = &values[i]
+	}
+
+	rowCount := 0
+	var resultRows []any
+	for rows.Next() {
+		rowCount++
+		if rowCount < offset {
+			continue
+		}
+		if rowCount >= limit {
+			continue
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return fmt.Errorf("Failed to scan row: %w", err)
+		}
+
+		resultRows = append(resultRows, values)
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("Rows iteration error: %w", err)
+	}
+
+	// Write response
+	response := QueryResponse{
+		Meta:          columnMeta,
+		Rows:          resultRows,
+		TotalCount:    rowCount,
+		ElapsedTimeUs: time.Since(startTime).Microseconds(),
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+	return nil
+}
 
 // responseQueryResultSlim writes query results as a binary octet-stream.
 // Binary protocol format:
