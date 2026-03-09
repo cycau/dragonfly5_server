@@ -36,7 +36,7 @@ const (
 
 // WireType constants for binary stream column values
 const (
-	WireNULL     byte = 0xFF
+	WireNULL     byte = 0x00
 	WireINT8     byte = 0x01
 	WireINT16    byte = 0x02
 	WireINT32    byte = 0x03
