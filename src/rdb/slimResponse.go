@@ -60,7 +60,7 @@ const (
 	slimRowBufGrow      = 256       // Pre-allocate for typical row size
 )
 
-var SLIM_RESPONSE_MODE = false
+var SLIM_RESPONSE_MODE = true
 
 func ResponseQueryResult(w http.ResponseWriter, rows *sql.Rows, offsetRows int, limitRows int, startTime time.Time) error {
 	if SLIM_RESPONSE_MODE {
@@ -368,6 +368,13 @@ func resolveCellWriter(value any) func(*bytes.Buffer, any) {
 			buf.Write(lenBuf[:])
 			buf.Write(b)
 		}
+	case time.Time:
+		return func(buf *bytes.Buffer, v any) {
+			var b [8]byte
+			buf.WriteByte(WireDATETIME)
+			binary.BigEndian.PutUint64(b[:], uint64(v.(time.Time).UnixNano()))
+			buf.Write(b[:])
+		}
 	case []byte:
 		return func(buf *bytes.Buffer, v any) {
 			buf.WriteByte(WireBYTES)
@@ -377,23 +384,16 @@ func resolveCellWriter(value any) func(*bytes.Buffer, any) {
 			buf.Write(lenBuf[:])
 			buf.Write(b)
 		}
-	case time.Time:
+	case sql.NullInt16:
 		return func(buf *bytes.Buffer, v any) {
-			var b [8]byte
-			buf.WriteByte(WireDATETIME)
-			binary.BigEndian.PutUint64(b[:], uint64(v.(time.Time).UnixNano()))
-			buf.Write(b[:])
-		}
-	case sql.NullInt64:
-		return func(buf *bytes.Buffer, v any) {
-			val := v.(sql.NullInt64)
+			val := v.(sql.NullInt16)
 			if !val.Valid {
 				buf.WriteByte(WireNULL)
 				return
 			}
-			var b [8]byte
-			buf.WriteByte(WireINT64)
-			binary.BigEndian.PutUint64(b[:], uint64(val.Int64))
+			var b [2]byte
+			buf.WriteByte(WireINT16)
+			binary.BigEndian.PutUint16(b[:], uint16(val.Int16))
 			buf.Write(b[:])
 		}
 	case sql.NullInt32:
@@ -408,27 +408,17 @@ func resolveCellWriter(value any) func(*bytes.Buffer, any) {
 			binary.BigEndian.PutUint32(b[:], uint32(val.Int32))
 			buf.Write(b[:])
 		}
-	case sql.NullInt16:
+	case sql.NullInt64:
 		return func(buf *bytes.Buffer, v any) {
-			val := v.(sql.NullInt16)
+			val := v.(sql.NullInt64)
 			if !val.Valid {
 				buf.WriteByte(WireNULL)
 				return
 			}
-			var b [2]byte
-			buf.WriteByte(WireINT16)
-			binary.BigEndian.PutUint16(b[:], uint16(val.Int16))
+			var b [8]byte
+			buf.WriteByte(WireINT64)
+			binary.BigEndian.PutUint64(b[:], uint64(val.Int64))
 			buf.Write(b[:])
-		}
-	case sql.NullByte:
-		return func(buf *bytes.Buffer, v any) {
-			val := v.(sql.NullByte)
-			if !val.Valid {
-				buf.WriteByte(WireNULL)
-				return
-			}
-			buf.WriteByte(WireUINT8)
-			buf.WriteByte(val.Byte)
 		}
 	case sql.NullFloat64:
 		return func(buf *bytes.Buffer, v any) {
@@ -481,6 +471,16 @@ func resolveCellWriter(value any) func(*bytes.Buffer, any) {
 			buf.WriteByte(WireDATETIME)
 			binary.BigEndian.PutUint64(b[:], uint64(val.Time.UnixNano()))
 			buf.Write(b[:])
+		}
+	case sql.NullByte:
+		return func(buf *bytes.Buffer, v any) {
+			val := v.(sql.NullByte)
+			if !val.Valid {
+				buf.WriteByte(WireNULL)
+				return
+			}
+			buf.WriteByte(WireUINT8)
+			buf.WriteByte(val.Byte)
 		}
 	default:
 		return func(buf *bytes.Buffer, v any) {
