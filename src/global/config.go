@@ -24,13 +24,14 @@ import (
 )
 
 type Config struct {
-	NodeName      string             `yaml:"nodeName"`
-	NodePort      int                `yaml:"nodePort"`
-	SecretKey     string             `yaml:"secretKey"`
-	MaxHttpQueue  int                `yaml:"maxHttpQueue"`
-	Logger        LoggerConfig       `yaml:"logger"`
-	MyDatasources []DatasourceConfig `yaml:"myDatasources"`
-	ClusterNodes  []string           `yaml:"clusterNodes"`
+	NodeName         string             `yaml:"nodeName"`
+	NodePort         int                `yaml:"nodePort"`
+	SecretKey        string             `yaml:"secretKey"`
+	MaxHttpQueue     int                `yaml:"maxHttpQueue"`
+	SlimResponseMode bool               `yaml:"slimResponseMode"`
+	Logger           LoggerConfig       `yaml:"logger"`
+	MyDatasources    []DatasourceConfig `yaml:"myDatasources"`
+	ClusterNodes     []string           `yaml:"clusterNodes"`
 }
 
 // LoggerConfig holds logging and rotation settings.
