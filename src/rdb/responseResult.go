@@ -522,10 +522,8 @@ func resolveCellWriter(value any) func(*bytes.Buffer, any) {
 	case time.Time:
 		return func(buf *bytes.Buffer, v any) {
 			buf.WriteByte(WireDATETIME)
-			b := fmt.Append(nil, v)
-			var lenBuf [4]byte
-			binary.BigEndian.PutUint32(lenBuf[:], uint32(len(b)))
-			buf.Write(lenBuf[:])
+			b := v.(time.Time).AppendFormat(nil, time.RFC3339Nano)
+			buf.WriteByte(byte(len(b)))
 			buf.Write(b)
 		}
 	case string:
@@ -615,10 +613,8 @@ func resolveCellWriter(value any) func(*bytes.Buffer, any) {
 				return
 			}
 			buf.WriteByte(WireDATETIME)
-			b := fmt.Append(nil, val.Time)
-			var lenBuf [4]byte
-			binary.BigEndian.PutUint32(lenBuf[:], uint32(len(b)))
-			buf.Write(lenBuf[:])
+			b := val.Time.AppendFormat(nil, time.RFC3339Nano)
+			buf.WriteByte(byte(len(b)))
 			buf.Write(b)
 		}
 	case sql.NullString:
