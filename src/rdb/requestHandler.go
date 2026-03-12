@@ -67,25 +67,9 @@ type ParamValue struct {
 	Value any       `json:"value,omitempty"`
 }
 
-// ExecuteResponse represents the response for /v1/rdb/execute
-type QueryResponse struct {
-	Meta          []ColumnMeta `json:"meta,omitempty"`
-	Rows          []any        `json:"rows"`
-	TotalCount    int          `json:"totalCount"`
-	ElapsedTimeUs int64        `json:"elapsedTimeUs"`
-}
-
 type ExecuteResponse struct {
 	EffectedRows  int64 `json:"effectedRows"`
 	ElapsedTimeUs int64 `json:"elapsedTimeUs"`
-}
-
-// ColumnMeta contains metadata about a column
-type ColumnMeta struct {
-	Name     string `json:"name"`
-	DBType   string `json:"dbType"`
-	WireType byte   `json:"wireType"`
-	Nullable bool   `json:"nullable"`
 }
 
 const STAT_WINDOW_INTERVAL = 5 * time.Minute

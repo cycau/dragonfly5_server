@@ -56,6 +56,22 @@ const (
 	WireBYTES  byte = 0x0F
 )
 
+// ColumnMeta contains metadata about a column
+type ColumnMeta struct {
+	Name     string `json:"name"`
+	DBType   string `json:"dbType"`
+	WireType byte   `json:"wireType"`
+	Nullable bool   `json:"nullable"`
+}
+
+// ColumnMeta represents metadata for a single column in the query result.
+type QueryResponse struct {
+	Meta          []ColumnMeta `json:"meta,omitempty"`
+	Rows          []any        `json:"rows"`
+	TotalCount    int          `json:"totalCount"`
+	ElapsedTimeUs int64        `json:"elapsedTimeUs"`
+}
+
 // Batching constants for throughput optimization
 const (
 	slimWriterBufSize   = 16 * 1024 // 16KB buffer
@@ -206,7 +222,7 @@ func resolveCellParser(value any) func(any) (any, byte) {
 		}
 	case time.Time:
 		return func(v any) (any, byte) {
-			return v.(time.Time).UnixNano(), WireDATETIME
+			return v, WireDATETIME
 		}
 	case string:
 		return func(v any) (any, byte) {
@@ -262,7 +278,7 @@ func resolveCellParser(value any) func(any) (any, byte) {
 			if !val.Valid {
 				return nil, WireDATETIME
 			}
-			return val.Time.UnixNano(), WireDATETIME
+			return val.Time, WireDATETIME
 		}
 	case sql.NullString:
 		return func(v any) (any, byte) {
@@ -505,10 +521,12 @@ func resolveCellWriter(value any) func(*bytes.Buffer, any) {
 		}
 	case time.Time:
 		return func(buf *bytes.Buffer, v any) {
-			var b [8]byte
 			buf.WriteByte(WireDATETIME)
-			binary.BigEndian.PutUint64(b[:], uint64(v.(time.Time).UnixNano()))
-			buf.Write(b[:])
+			b := fmt.Append(nil, v)
+			var lenBuf [4]byte
+			binary.BigEndian.PutUint32(lenBuf[:], uint32(len(b)))
+			buf.Write(lenBuf[:])
+			buf.Write(b)
 		}
 	case string:
 		return func(buf *bytes.Buffer, v any) {
@@ -596,10 +614,12 @@ func resolveCellWriter(value any) func(*bytes.Buffer, any) {
 				buf.WriteByte(WireNULL)
 				return
 			}
-			var b [8]byte
 			buf.WriteByte(WireDATETIME)
-			binary.BigEndian.PutUint64(b[:], uint64(val.Time.UnixNano()))
-			buf.Write(b[:])
+			b := fmt.Append(nil, val.Time)
+			var lenBuf [4]byte
+			binary.BigEndian.PutUint32(lenBuf[:], uint32(len(b)))
+			buf.Write(lenBuf[:])
+			buf.Write(b)
 		}
 	case sql.NullString:
 		return func(buf *bytes.Buffer, v any) {
@@ -628,7 +648,7 @@ func resolveCellWriter(value any) func(*bytes.Buffer, any) {
 	default:
 		return func(buf *bytes.Buffer, v any) {
 			buf.WriteByte(WireSTRING)
-			b := []byte(fmt.Sprint(v))
+			b := fmt.Append(nil, v)
 			var lenBuf [4]byte
 			binary.BigEndian.PutUint32(lenBuf[:], uint32(len(b)))
 			buf.Write(lenBuf[:])
