@@ -204,13 +204,13 @@ func resolveCellParser(value any) func(any) (any, byte) {
 		return func(v any) (any, byte) {
 			return v, WireBOOL1
 		}
+	case time.Time:
+		return func(v any) (any, byte) {
+			return v.(time.Time).UnixNano(), WireDATETIME
+		}
 	case string:
 		return func(v any) (any, byte) {
 			return v, WireSTRING
-		}
-	case time.Time:
-		return func(v any) (any, byte) {
-			return v, WireDATETIME
 		}
 	case []byte:
 		return func(v any) (any, byte) {
@@ -256,6 +256,14 @@ func resolveCellParser(value any) func(any) (any, byte) {
 			}
 			return val.Bool, WireBOOL1
 		}
+	case sql.NullTime:
+		return func(v any) (any, byte) {
+			val := v.(sql.NullTime)
+			if !val.Valid {
+				return nil, WireDATETIME
+			}
+			return val.Time.UnixNano(), WireDATETIME
+		}
 	case sql.NullString:
 		return func(v any) (any, byte) {
 			val := v.(sql.NullString)
@@ -263,14 +271,6 @@ func resolveCellParser(value any) func(any) (any, byte) {
 				return nil, WireSTRING
 			}
 			return val.String, WireSTRING
-		}
-	case sql.NullTime:
-		return func(v any) (any, byte) {
-			val := v.(sql.NullTime)
-			if !val.Valid {
-				return nil, WireDATETIME
-			}
-			return val.Time, WireDATETIME
 		}
 	case sql.NullByte:
 		return func(v any) (any, byte) {
@@ -503,6 +503,13 @@ func resolveCellWriter(value any) func(*bytes.Buffer, any) {
 				buf.WriteByte(2)
 			}
 		}
+	case time.Time:
+		return func(buf *bytes.Buffer, v any) {
+			var b [8]byte
+			buf.WriteByte(WireDATETIME)
+			binary.BigEndian.PutUint64(b[:], uint64(v.(time.Time).UnixNano()))
+			buf.Write(b[:])
+		}
 	case string:
 		return func(buf *bytes.Buffer, v any) {
 			buf.WriteByte(WireSTRING)
@@ -511,13 +518,6 @@ func resolveCellWriter(value any) func(*bytes.Buffer, any) {
 			binary.BigEndian.PutUint32(lenBuf[:], uint32(len(b)))
 			buf.Write(lenBuf[:])
 			buf.Write(b)
-		}
-	case time.Time:
-		return func(buf *bytes.Buffer, v any) {
-			var b [8]byte
-			buf.WriteByte(WireDATETIME)
-			binary.BigEndian.PutUint64(b[:], uint64(v.(time.Time).UnixNano()))
-			buf.Write(b[:])
 		}
 	case []byte:
 		return func(buf *bytes.Buffer, v any) {
@@ -589,6 +589,18 @@ func resolveCellWriter(value any) func(*bytes.Buffer, any) {
 				buf.WriteByte(2)
 			}
 		}
+	case sql.NullTime:
+		return func(buf *bytes.Buffer, v any) {
+			val := v.(sql.NullTime)
+			if !val.Valid {
+				buf.WriteByte(WireNULL)
+				return
+			}
+			var b [8]byte
+			buf.WriteByte(WireDATETIME)
+			binary.BigEndian.PutUint64(b[:], uint64(val.Time.UnixNano()))
+			buf.Write(b[:])
+		}
 	case sql.NullString:
 		return func(buf *bytes.Buffer, v any) {
 			val := v.(sql.NullString)
@@ -602,18 +614,6 @@ func resolveCellWriter(value any) func(*bytes.Buffer, any) {
 			binary.BigEndian.PutUint32(lenBuf[:], uint32(len(b)))
 			buf.Write(lenBuf[:])
 			buf.Write(b)
-		}
-	case sql.NullTime:
-		return func(buf *bytes.Buffer, v any) {
-			val := v.(sql.NullTime)
-			if !val.Valid {
-				buf.WriteByte(WireNULL)
-				return
-			}
-			var b [8]byte
-			buf.WriteByte(WireDATETIME)
-			binary.BigEndian.PutUint64(b[:], uint64(val.Time.UnixNano()))
-			buf.Write(b[:])
 		}
 	case sql.NullByte:
 		return func(buf *bytes.Buffer, v any) {
