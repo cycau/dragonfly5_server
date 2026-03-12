@@ -33,7 +33,6 @@ import (
 	"github.com/paulbellamy/ratecounter"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
-	"github.com/shopspring/decimal"
 )
 
 type RequestParams struct {
@@ -53,13 +52,13 @@ const (
 	NULL     ValueType = "NULL"
 	INT      ValueType = "INT"
 	LONG     ValueType = "LONG"
+	FLOAT    ValueType = "FLOAT"
 	DOUBLE   ValueType = "DOUBLE"
-	DECIMAL  ValueType = "DECIMAL"
 	BOOL     ValueType = "BOOL"
 	DATE     ValueType = "DATE"
 	DATETIME ValueType = "DATETIME"
 	STRING   ValueType = "STRING"
-	BINARY   ValueType = "BINARY"
+	BYTES    ValueType = "BYTES"
 )
 
 // ParamValue represents a parameter value
@@ -85,6 +84,7 @@ type ExecuteResponse struct {
 type ColumnMeta struct {
 	Name     string `json:"name"`
 	DBType   string `json:"dbType"`
+	WireType byte   `json:"wireType"`
 	Nullable bool   `json:"nullable"`
 }
 
@@ -511,11 +511,8 @@ func convertParam(p ParamValue) (any, error) {
 		if val, ok := p.Value.(int); ok {
 			return int32(val), nil
 		}
-		if val, ok := p.Value.(int64); ok {
-			return int32(val), nil
-		}
 		if val, ok := p.Value.(string); ok {
-			var intVal int
+			var intVal int32
 			_, err := fmt.Sscanf(val, "%d", &intVal)
 			if err != nil {
 				return nil, fmt.Errorf("Invalid int32 string: %v", err)
@@ -533,9 +530,6 @@ func convertParam(p ParamValue) (any, error) {
 		if val, ok := p.Value.(int); ok {
 			return int64(val), nil
 		}
-		if val, ok := p.Value.(int32); ok {
-			return int64(val), nil
-		}
 		if val, ok := p.Value.(string); ok {
 			var intVal int64
 			_, err := fmt.Sscanf(val, "%d", &intVal)
@@ -545,12 +539,34 @@ func convertParam(p ParamValue) (any, error) {
 			return intVal, nil
 		}
 		return nil, fmt.Errorf("Invalid int64 value: %v", p.Value)
-	case DOUBLE:
+	case FLOAT:
 		if val, ok := p.Value.(float32); ok {
 			return val, nil
 		}
 		if val, ok := p.Value.(float64); ok {
+			return float32(val), nil
+		}
+		if val, ok := p.Value.(int); ok {
+			return float32(val), nil
+		}
+		if val, ok := p.Value.(string); ok {
+			var floatVal float32
+			_, err := fmt.Sscanf(val, "%f", &floatVal)
+			if err != nil {
+				return nil, fmt.Errorf("Invalid float32 string: %v", err)
+			}
+			return floatVal, nil
+		}
+		return nil, fmt.Errorf("Invalid float32 value: %v", p.Value)
+	case DOUBLE:
+		if val, ok := p.Value.(float64); ok {
 			return val, nil
+		}
+		if val, ok := p.Value.(float32); ok {
+			return float64(val), nil
+		}
+		if val, ok := p.Value.(int); ok {
+			return float64(val), nil
 		}
 		if val, ok := p.Value.(string); ok {
 			var floatVal float64
@@ -561,27 +577,15 @@ func convertParam(p ParamValue) (any, error) {
 			return floatVal, nil
 		}
 		return nil, fmt.Errorf("Invalid float64 value: %v", p.Value)
-	case DECIMAL:
-		if val, ok := p.Value.(decimal.Decimal); ok {
-			return val, nil
-		}
-		if val, ok := p.Value.(string); ok {
-			dec, err := decimal.NewFromString(val)
-			if err != nil {
-				return nil, fmt.Errorf("Invalid decimal string: %w", err)
-			}
-			return dec, nil
-		}
-		return nil, fmt.Errorf("Invalid decimal value: %v", p.Value)
 	case BOOL:
 		if val, ok := p.Value.(bool); ok {
 			return val, nil
 		}
 		if val, ok := p.Value.(string); ok {
 			switch val {
-			case "true":
+			case "true", "True", "TRUE", "1":
 				return true, nil
-			case "false":
+			case "false", "False", "FALSE", "0":
 				return false, nil
 			}
 		}
@@ -591,7 +595,7 @@ func convertParam(p ParamValue) (any, error) {
 			return val, nil
 		}
 		return fmt.Sprintf("%v", p.Value), nil
-	case BINARY:
+	case BYTES:
 		if val, ok := p.Value.([]byte); ok {
 			return val, nil
 		}

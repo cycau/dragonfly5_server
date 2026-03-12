@@ -100,7 +100,7 @@ func (r *Router) StartHealthTicker() {
 			otherNodes = append(otherNodes, node)
 		}
 	}
-	// r.balancer.OtherNodes = otherNodes // TODO: comment out for debug
+	r.balancer.OtherNodes = otherNodes
 
 	selfNode := r.balancer.SelfNode
 	selfNode.Mu.Lock()
