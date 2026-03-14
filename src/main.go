@@ -138,7 +138,7 @@ func runServer(config global.Config) {
 	fmt.Printf("### [Config] Node ID: %s\n", thisNode.NodeID)
 	fmt.Printf("### [Config] Node Name: %s\n", config.NodeName)
 	fmt.Printf("### [Config] Max Client HTTP Queue: %d\n", maxHttpQueue)
-	fmt.Printf("### [Config] Slim Response Mode: %v\n", config.SlimResponseMode)
+	fmt.Printf("### [Config] Streaming Response Mode: %v\n", config.StreamingResponseMode)
 	fmt.Printf("### [Config] Datasources: %v\n", datasourceInfo)
 
 	// collect cluster health information
@@ -152,7 +152,7 @@ func runServer(config global.Config) {
 	balancer := cluster.NewBalancer(thisNode, clusterNodes)
 
 	// Create router
-	handler := rdb.NewRequestHandler(dsManager, config.SlimResponseMode)
+	handler := rdb.NewRequestHandler(dsManager, config.StreamingResponseMode)
 	router := NewRouter(balancer, handler)
 
 	// Create HTTP server
@@ -167,7 +167,7 @@ func runServer(config global.Config) {
 
 	// Start server in a goroutine
 	go func() {
-		fmt.Printf("### [Server] Starting on port: %d\n", config.NodePort)
+		fmt.Printf("### [Config] Server starting on port: %d\n", config.NodePort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			fmt.Printf("### [Server] Server failed to start: %v\n", err)
 			os.Exit(1)

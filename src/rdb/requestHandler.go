@@ -24,6 +24,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,22 +44,23 @@ type RequestParams struct {
 	LimitRows  int          `json:"limitRows,omitempty"`
 }
 
-// INT, LONG, DOUBLE, DECIMAL, BOOL
+// BOOL, INT, LONG, FLOAT, DOUBLE, DECIMAL
 // DATE, DATETIME
 // STRING, BINARY
 type ValueType string
 
 const (
 	NULL     ValueType = "NULL"
+	BOOL     ValueType = "BOOL"
 	INT      ValueType = "INT"
 	LONG     ValueType = "LONG"
 	FLOAT    ValueType = "FLOAT"
 	DOUBLE   ValueType = "DOUBLE"
-	BOOL     ValueType = "BOOL"
 	DATE     ValueType = "DATE"
 	DATETIME ValueType = "DATETIME"
 	STRING   ValueType = "STRING"
 	BYTES    ValueType = "BYTES"
+	AS_IS    ValueType = "AS_IS"
 )
 
 // ParamValue represents a parameter value
@@ -85,16 +87,16 @@ type StatsInfo struct {
 
 // ExecuteHandler handles /v1/rdb/execute requests
 type RequestHandler struct {
-	dsManager        *DsManager
-	statsInfos       []*StatsInfo
-	slimResponseMode bool
+	dsManager             *DsManager
+	statsInfos            []*StatsInfo
+	streamingResponseMode bool
 }
 
 // NewRequestHandler constructs a RequestHandler that uses the given DsManager and
 // allocates one StatsInfo per datasource. Each StatsInfo has a Prometheus
 // summary for p95 latency and rate counters (STAT_WINDOW_INTERVAL) for
 // total requests, errors, and timeouts, used for health and balancer scoring.
-func NewRequestHandler(dsManager *DsManager, slimResponseMode bool) *RequestHandler {
+func NewRequestHandler(dsManager *DsManager, streamingResponseMode bool) *RequestHandler {
 	statsInfos := make([]*StatsInfo, len(dsManager.dss))
 	for i := range statsInfos {
 		var statLatency = prometheus.NewSummaryVec(prometheus.SummaryOpts{
@@ -109,9 +111,9 @@ func NewRequestHandler(dsManager *DsManager, slimResponseMode bool) *RequestHand
 		}
 	}
 	return &RequestHandler{
-		dsManager:        dsManager,
-		statsInfos:       statsInfos,
-		slimResponseMode: slimResponseMode,
+		dsManager:             dsManager,
+		statsInfos:            statsInfos,
+		streamingResponseMode: streamingResponseMode,
 	}
 }
 
@@ -157,7 +159,7 @@ func (rh *RequestHandler) Query(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	if rh.slimResponseMode {
+	if rh.streamingResponseMode {
 		// In slim response mode, we skip meta and totalCount to reduce overhead.
 		if err := responseQueryResultSlim(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
 			ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
@@ -220,7 +222,7 @@ func (rh *RequestHandler) QueryTx(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	if rh.slimResponseMode {
+	if rh.streamingResponseMode {
 		// In slim response mode, we skip meta and totalCount to reduce overhead.
 		if err := responseQueryResultSlim(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
 			ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
@@ -474,7 +476,7 @@ func convertParams(params []ParamValue) ([]any, error) {
 }
 
 // convertParam converts a single ParamValue to a driver-compatible value
-// based on its Type (NULL, INT, LONG, DOUBLE, DECIMAL, BOOL, STRING, BINARY,
+// based on its Type (NULL, BOOL, INT, LONG, FLOAT, DOUBLE, DECIMAL, STRING, BINARY,
 // DATE, DATETIME). Accepts various JSON number/string representations and
 // returns an error for invalid or unknown types.
 func convertParam(p ParamValue) (any, error) {
@@ -485,6 +487,19 @@ func convertParam(p ParamValue) (any, error) {
 	switch p.Type {
 	case NULL:
 		return nil, nil
+	case BOOL:
+		if val, ok := p.Value.(bool); ok {
+			return val, nil
+		}
+		if val, ok := p.Value.(string); ok {
+			switch strings.ToLower(val) {
+			case "true", "1":
+				return true, nil
+			case "false", "0":
+				return false, nil
+			}
+		}
+		return nil, fmt.Errorf("Invalid bool value: %v", p.Value)
 	case INT:
 		if val, ok := p.Value.(int32); ok {
 			return val, nil
@@ -561,19 +576,6 @@ func convertParam(p ParamValue) (any, error) {
 			return floatVal, nil
 		}
 		return nil, fmt.Errorf("Invalid float64 value: %v", p.Value)
-	case BOOL:
-		if val, ok := p.Value.(bool); ok {
-			return val, nil
-		}
-		if val, ok := p.Value.(string); ok {
-			switch val {
-			case "true", "True", "TRUE", "1":
-				return true, nil
-			case "false", "False", "FALSE", "0":
-				return false, nil
-			}
-		}
-		return nil, fmt.Errorf("Invalid bool value: %v", p.Value)
 	case STRING:
 		if val, ok := p.Value.(string); ok {
 			return val, nil
@@ -603,6 +605,8 @@ func convertParam(p ParamValue) (any, error) {
 			return t, nil
 		}
 		return nil, fmt.Errorf("Invalid timestamp_rfc3339 value: %v", p.Value)
+	case AS_IS:
+		return p.Value, nil
 	default:
 		return nil, fmt.Errorf("Unknown param type: %s", p.Type)
 	}
