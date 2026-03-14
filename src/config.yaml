@@ -22,7 +22,7 @@ myDatasources:
     databaseName: crm-system
     driver: postgres # postgres, mysql
     dsn: "postgres://admin:abcd1234@localhost:5432/lps?sslmode=disable"
-    maxConns: 100
+    maxConns: 20
     maxWriteConns: 6
     minWriteConns: 4
     maxConnLifetimeSec: 1800
@@ -32,9 +32,9 @@ myDatasources:
     databaseName: crm-system
     driver: postgres
     dsn: "postgres://admin:abcd1234@localhost:5432/lps?sslmode=disable"
-    maxConns: 20
-    maxWriteConns: 6
-    minWriteConns: 4
+    maxConns: 10
+    maxWriteConns: 3
+    minWriteConns: 2
     maxConnLifetimeSec: 1800
     maxTxIdleTimeoutSec: 15
     defaultQueryTimeoutSec: 30
