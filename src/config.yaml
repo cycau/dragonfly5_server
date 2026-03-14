@@ -1,7 +1,8 @@
 nodeName: "dbapi-1"
 nodePort: 5679
-maxHttpQueue: 10000
 secretKey: "secret-key"
+maxHttpQueue: 10000
+streamingResponseMode: false
 
 logger:
   level: info      # debug, info, warn, error
@@ -21,8 +22,8 @@ myDatasources:
     databaseName: crm-system
     driver: postgres # postgres, mysql
     dsn: "postgres://admin:abcd1234@localhost:5432/lps?sslmode=disable"
-    maxConns: 10
-    maxWriteConns: 10
+    maxConns: 20
+    maxWriteConns: 6
     minWriteConns: 4
     maxConnLifetimeSec: 1800
     maxTxIdleTimeoutSec: 15
@@ -32,8 +33,8 @@ myDatasources:
     driver: postgres
     dsn: "postgres://admin:abcd1234@localhost:5432/lps?sslmode=disable"
     maxConns: 10
-    maxWriteConns: 10
-    minWriteConns: 4
+    maxWriteConns: 3
+    minWriteConns: 2
     maxConnLifetimeSec: 1800
     maxTxIdleTimeoutSec: 15
     defaultQueryTimeoutSec: 30

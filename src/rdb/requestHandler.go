@@ -24,6 +24,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,7 +34,6 @@ import (
 	"github.com/paulbellamy/ratecounter"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
-	"github.com/shopspring/decimal"
 )
 
 type RequestParams struct {
@@ -44,22 +44,23 @@ type RequestParams struct {
 	LimitRows  int          `json:"limitRows,omitempty"`
 }
 
-// INT, LONG, DOUBLE, DECIMAL, BOOL
+// BOOL, INT, LONG, FLOAT, DOUBLE, DECIMAL
 // DATE, DATETIME
 // STRING, BINARY
 type ValueType string
 
 const (
 	NULL     ValueType = "NULL"
+	BOOL     ValueType = "BOOL"
 	INT      ValueType = "INT"
 	LONG     ValueType = "LONG"
+	FLOAT    ValueType = "FLOAT"
 	DOUBLE   ValueType = "DOUBLE"
-	DECIMAL  ValueType = "DECIMAL"
-	BOOL     ValueType = "BOOL"
 	DATE     ValueType = "DATE"
 	DATETIME ValueType = "DATETIME"
 	STRING   ValueType = "STRING"
-	BINARY   ValueType = "BINARY"
+	BYTES    ValueType = "BYTES"
+	AS_IS    ValueType = "AS_IS"
 )
 
 // ParamValue represents a parameter value
@@ -68,24 +69,9 @@ type ParamValue struct {
 	Value any       `json:"value,omitempty"`
 }
 
-// ExecuteResponse represents the response for /v1/rdb/execute
-type QueryResponse struct {
-	Meta          []ColumnMeta `json:"meta,omitempty"`
-	Rows          []any        `json:"rows"`
-	TotalCount    int          `json:"totalCount"`
-	ElapsedTimeUs int64        `json:"elapsedTimeUs"`
-}
-
 type ExecuteResponse struct {
 	EffectedRows  int64 `json:"effectedRows"`
 	ElapsedTimeUs int64 `json:"elapsedTimeUs"`
-}
-
-// ColumnMeta contains metadata about a column
-type ColumnMeta struct {
-	Name     string `json:"name"`
-	DBType   string `json:"dbType"`
-	Nullable bool   `json:"nullable"`
 }
 
 const STAT_WINDOW_INTERVAL = 5 * time.Minute
@@ -100,18 +86,17 @@ type StatsInfo struct {
 }
 
 // ExecuteHandler handles /v1/rdb/execute requests
-type DmlHandler struct {
-	dsManager  *DsManager
-	statsInfos []*StatsInfo
+type RequestHandler struct {
+	dsManager             *DsManager
+	statsInfos            []*StatsInfo
+	streamingResponseMode bool
 }
 
-var slimResponseMode = false
-
-// NewDmlHandler constructs a DmlHandler that uses the given DsManager and
+// NewRequestHandler constructs a RequestHandler that uses the given DsManager and
 // allocates one StatsInfo per datasource. Each StatsInfo has a Prometheus
 // summary for p95 latency and rate counters (STAT_WINDOW_INTERVAL) for
 // total requests, errors, and timeouts, used for health and balancer scoring.
-func NewDmlHandler(dsManager *DsManager) *DmlHandler {
+func NewRequestHandler(dsManager *DsManager, streamingResponseMode bool) *RequestHandler {
 	statsInfos := make([]*StatsInfo, len(dsManager.dss))
 	for i := range statsInfos {
 		var statLatency = prometheus.NewSummaryVec(prometheus.SummaryOpts{
@@ -125,9 +110,10 @@ func NewDmlHandler(dsManager *DsManager) *DmlHandler {
 			statTimeouts: ratecounter.NewRateCounter(STAT_WINDOW_INTERVAL),
 		}
 	}
-	return &DmlHandler{
-		dsManager:  dsManager,
-		statsInfos: statsInfos,
+	return &RequestHandler{
+		dsManager:             dsManager,
+		statsInfos:            statsInfos,
+		streamingResponseMode: streamingResponseMode,
 	}
 }
 
@@ -136,7 +122,7 @@ func NewDmlHandler(dsManager *DsManager) *DmlHandler {
 // limitRows), runs a read-only query via DsManager.Query, then streams the
 // result as JSON (meta, rows, totalCount, elapsedTimeUs). On timeout or
 // error it updates stats and returns an appropriate HTTP error.
-func (dh *DmlHandler) Query(w http.ResponseWriter, r *http.Request) {
+func (rh *RequestHandler) Query(w http.ResponseWriter, r *http.Request) {
 	dsIDX, ok := GetCtxDsIdx(r)
 	if !ok {
 		ResponseError(w, r, RP_BAD_REQUEST, "Datasource INDEX hasn't decided by Balancer")
@@ -144,16 +130,16 @@ func (dh *DmlHandler) Query(w http.ResponseWriter, r *http.Request) {
 	}
 
 	startTime := time.Now()
-	req, parameters, err := dh.parseRequest(r)
+	req, parameters, err := parseRequest(r)
 	if err != nil {
 		ResponseError(w, r, RP_BAD_REQUEST, err.Error())
 		return
 	}
 
-	global.GetCtxLogger(r.Context()).Debug("DmlHandler", "detail", "Executing Query", "dsIDX", dsIDX, "sql", req.SQL, "params", parameters)
+	global.GetCtxLogger(r.Context()).Debug("RequestHandler", "detail", "Executing Query", "dsIDX", dsIDX, "sql", req.SQL, "params", parameters)
 
 	// Execute query without transaction
-	rows, releaseResource, err := dh.dsManager.Query(r.Context(), req.TimeoutSec, dsIDX, req.SQL, parameters...)
+	rows, releaseResource, err := rh.dsManager.Query(r.Context(), req.TimeoutSec, dsIDX, req.SQL, parameters...)
 	if releaseResource != nil {
 		defer releaseResource()
 	}
@@ -163,36 +149,39 @@ func (dh *DmlHandler) Query(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err == context.DeadlineExceeded {
-			dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
+			rh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
 			ResponseError(w, r, RP_CLIENT_CANCELLED, "Request timeout for Query")
 			return
 		}
-		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
+		rh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
 		ResponseError(w, r, RP_DATASOURCE_EXCEPTION, err.Error())
 		return
 	}
 	defer rows.Close()
 
-	if slimResponseMode {
+	if rh.streamingResponseMode {
+		// In slim response mode, we skip meta and totalCount to reduce overhead.
 		if err := responseQueryResultSlim(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
 			ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
+			rh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
+			return
 		}
-		return
-	}
-	if err := dh.responseQueryResult(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
-		ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
-		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
-		return
+	} else {
+		if err := responseQueryResultJson(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
+			ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
+			rh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
+			return
+		}
 	}
 
-	dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, false)
+	rh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, false)
 }
 
 // QueryTx handles POST /rdb/tx/query. The transaction ID is taken from the
 // request header. It parses the body, runs the query in that transaction
 // via DsManager.QueryTx, then streams the result as JSON. On timeout or
 // error it updates stats and returns an appropriate HTTP error.
-func (dh *DmlHandler) QueryTx(w http.ResponseWriter, r *http.Request) {
+func (rh *RequestHandler) QueryTx(w http.ResponseWriter, r *http.Request) {
 	txID := r.Header.Get(HEADER_TX_ID)
 	if txID == "" {
 		ResponseError(w, r, RP_BAD_REQUEST, "TxID is required")
@@ -200,16 +189,16 @@ func (dh *DmlHandler) QueryTx(w http.ResponseWriter, r *http.Request) {
 	}
 
 	startTime := time.Now()
-	req, parameters, err := dh.parseRequest(r)
+	req, parameters, err := parseRequest(r)
 	if err != nil {
 		ResponseError(w, r, RP_BAD_REQUEST, err.Error())
 		return
 	}
 
-	global.GetCtxLogger(r.Context()).Debug("DmlHandler", "detail", "Executing QueryTx", "txID", txID, "sql", req.SQL, "params", parameters)
+	global.GetCtxLogger(r.Context()).Debug("RequestHandler", "detail", "Executing QueryTx", "txID", txID, "sql", req.SQL, "params", parameters)
 
 	// Execute query in transaction
-	rows, releaseResource, dsIDX, err := dh.dsManager.QueryTx(r.Context(), req.TimeoutSec, txID, req.SQL, parameters...)
+	rows, releaseResource, dsIDX, err := rh.dsManager.QueryTx(r.Context(), req.TimeoutSec, txID, req.SQL, parameters...)
 	if releaseResource != nil {
 		defer releaseResource()
 	}
@@ -223,131 +212,39 @@ func (dh *DmlHandler) QueryTx(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err == context.DeadlineExceeded {
-			dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
+			rh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
 			ResponseError(w, r, RP_CLIENT_CANCELLED, "Request timeout for QueryTx")
 			return
 		}
-		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
+		rh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
 		global.ResponseError(w, r, RP_DATASOURCE_EXCEPTION, err.Error())
 		return
 	}
 	defer rows.Close()
 
-	if slimResponseMode {
+	if rh.streamingResponseMode {
+		// In slim response mode, we skip meta and totalCount to reduce overhead.
 		if err := responseQueryResultSlim(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
 			ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
+			rh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
+			return
 		}
-		return
-	}
-	if err := dh.responseQueryResult(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
-		ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
-		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
-		return
-	}
-
-	dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, false)
-}
-
-// responseQueryResult reads all rows (up to limitRows), builds column
-// metadata and JSON-serializable row values ([]byte→base64, time→RFC3339,
-// decimal→string), and writes a QueryResponse (meta, rows, totalCount,
-// elapsedTimeUs) as JSON. Returns an error on column/scan/iteration failure.
-func (dh *DmlHandler) responseQueryResult(w http.ResponseWriter, rows *sql.Rows, offsetRows int, limitRows int, startTime time.Time) error {
-
-	// Get column information
-	columns, err := rows.Columns()
-	if err != nil {
-		return fmt.Errorf("Failed to get columns: %w", err)
-	}
-
-	columnTypes, err := rows.ColumnTypes()
-	if err != nil {
-		return fmt.Errorf("Failed to get column types: %w", err)
-	}
-
-	// Build column metadata
-	columnMeta := make([]ColumnMeta, len(columns))
-	for i, colType := range columnTypes {
-		nullable, _ := colType.Nullable()
-		columnMeta[i] = ColumnMeta{
-			Name:     columns[i],
-			DBType:   colType.DatabaseTypeName(),
-			Nullable: nullable,
+	} else {
+		if err := responseQueryResultJson(w, rows, req.OffsetRows, req.LimitRows, startTime); err != nil {
+			ResponseError(w, r, RP_SERVER_EXCEPTION, err.Error())
+			rh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
+			return
 		}
 	}
 
-	offset := offsetRows + 1
-	limit := math.MaxInt32
-	if limitRows > 0 {
-		limit = offset + limitRows
-	}
-
-	// Read rows
-	var resultRows []any
-	rowCount := 0
-	for rows.Next() {
-		rowCount++
-		if rowCount < offset {
-			continue
-		}
-		if rowCount >= limit {
-			continue
-		}
-
-		// Create slice for scanning
-		values := make([]any, len(columns))
-		valuePtrs := make([]any, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		if err := rows.Scan(valuePtrs...); err != nil {
-			return fmt.Errorf("Failed to scan row: %w", err)
-		}
-
-		for i, val := range values {
-			if val == nil {
-				continue
-			}
-
-			switch v := val.(type) {
-			case []byte:
-				values[i] = base64.StdEncoding.EncodeToString(v)
-			case time.Time:
-				values[i] = v.Format(time.RFC3339)
-			case decimal.Decimal:
-				values[i] = v.String()
-			default:
-				values[i] = v
-			}
-		}
-
-		resultRows = append(resultRows, values)
-	}
-
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("Rows iteration error: %w", err)
-	}
-
-	// Write response
-	response := QueryResponse{
-		Meta:          columnMeta,
-		Rows:          resultRows,
-		TotalCount:    rowCount,
-		ElapsedTimeUs: time.Since(startTime).Microseconds(),
-	}
-
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
-	return nil
+	rh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, false)
 }
 
 // Execute handles POST /rdb/execute. The datasource index is taken from
 // context. It parses the body, runs the statement via DsManager.Execute,
 // then responds with effectedRows and elapsedTimeUs. On timeout or error
 // it updates stats and returns an appropriate HTTP error.
-func (dh *DmlHandler) Execute(w http.ResponseWriter, r *http.Request) {
+func (rh *RequestHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	dsIDX, ok := GetCtxDsIdx(r)
 	if !ok {
 		ResponseError(w, r, RP_BAD_REQUEST, "Datasource INDEX hasn't decided by Balancer")
@@ -355,15 +252,15 @@ func (dh *DmlHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	startTime := time.Now()
-	req, parameters, err := dh.parseRequest(r)
+	req, parameters, err := parseRequest(r)
 	if err != nil {
 		ResponseError(w, r, RP_BAD_REQUEST, err.Error())
 		return
 	}
-	global.GetCtxLogger(r.Context()).Debug("DmlHandler", "detail", "Executing Execute", "dsIDX", dsIDX, "sql", req.SQL, "params", parameters)
+	global.GetCtxLogger(r.Context()).Debug("RequestHandler", "detail", "Executing Execute", "dsIDX", dsIDX, "sql", req.SQL, "params", parameters)
 
 	// Get database
-	result, releaseResource, err := dh.dsManager.Execute(r.Context(), req.TimeoutSec, dsIDX, req.SQL, parameters...)
+	result, releaseResource, err := rh.dsManager.Execute(r.Context(), req.TimeoutSec, dsIDX, req.SQL, parameters...)
 	if releaseResource != nil {
 		defer releaseResource()
 	}
@@ -373,11 +270,11 @@ func (dh *DmlHandler) Execute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err == context.DeadlineExceeded {
-			dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
+			rh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
 			ResponseError(w, r, RP_CLIENT_CANCELLED, "Request timeout for Execute")
 			return
 		}
-		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
+		rh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
 		ResponseError(w, r, RP_DATASOURCE_EXCEPTION, err.Error())
 		return
 	}
@@ -390,7 +287,7 @@ func (dh *DmlHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update health info: record successful execution
-	dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, false)
+	rh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, false)
 
 	// Write response
 	response := ExecuteResponse{
@@ -408,7 +305,7 @@ func (dh *DmlHandler) Execute(w http.ResponseWriter, r *http.Request) {
 // transaction via DsManager.ExecuteTx, then responds with effectedRows
 // and elapsedTimeUs. On timeout or error it updates stats and returns an
 // appropriate HTTP error.
-func (dh *DmlHandler) ExecuteTx(w http.ResponseWriter, r *http.Request) {
+func (rh *RequestHandler) ExecuteTx(w http.ResponseWriter, r *http.Request) {
 	txID := r.Header.Get(HEADER_TX_ID)
 	if txID == "" {
 		ResponseError(w, r, RP_BAD_REQUEST, "TxID is required")
@@ -417,15 +314,15 @@ func (dh *DmlHandler) ExecuteTx(w http.ResponseWriter, r *http.Request) {
 
 	startTime := time.Now()
 
-	req, parameters, err := dh.parseRequest(r)
+	req, parameters, err := parseRequest(r)
 	if err != nil {
 		ResponseError(w, r, RP_BAD_REQUEST, err.Error())
 		return
 	}
-	global.GetCtxLogger(r.Context()).Debug("DmlHandler", "detail", "Executing ExecuteTx", "txID", txID, "sql", req.SQL, "params", parameters)
+	global.GetCtxLogger(r.Context()).Debug("RequestHandler", "detail", "Executing ExecuteTx", "txID", txID, "sql", req.SQL, "params", parameters)
 
 	// Execute in transaction
-	result, releaseResource, dsIDX, err := dh.dsManager.ExecuteTx(r.Context(), req.TimeoutSec, txID, req.SQL, parameters...)
+	result, releaseResource, dsIDX, err := rh.dsManager.ExecuteTx(r.Context(), req.TimeoutSec, txID, req.SQL, parameters...)
 	if releaseResource != nil {
 		defer releaseResource()
 	}
@@ -439,11 +336,11 @@ func (dh *DmlHandler) ExecuteTx(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err == context.DeadlineExceeded {
-			dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
+			rh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, true)
 			ResponseError(w, r, RP_CLIENT_CANCELLED, "Request timeout for ExecuteTx")
 			return
 		}
-		dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
+		rh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), true, false)
 		ResponseError(w, r, RP_DATASOURCE_EXCEPTION, err.Error())
 		return
 	}
@@ -456,7 +353,7 @@ func (dh *DmlHandler) ExecuteTx(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update health info: record successful execution
-	dh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, false)
+	rh.statsSetResult(dsIDX, time.Since(startTime).Milliseconds(), false, false)
 
 	// Write response
 	response := ExecuteResponse{
@@ -473,12 +370,12 @@ func (dh *DmlHandler) ExecuteTx(w http.ResponseWriter, r *http.Request) {
 // It always increments the total counter. If isError or isTimeout it
 // increments the corresponding rate counter; otherwise it records latencyMs
 // in the p95 summary. Ignores invalid datasourceIdx (< 0).
-func (dh *DmlHandler) statsSetResult(datasourceIdx int, latencyMs int64, isError bool, isTimeout bool) {
+func (rh *RequestHandler) statsSetResult(datasourceIdx int, latencyMs int64, isError bool, isTimeout bool) {
 	if datasourceIdx < 0 {
 		return // When invalid TxID
 	}
 
-	stats := dh.statsInfos[datasourceIdx]
+	stats := rh.statsInfos[datasourceIdx]
 	stats.mu.Lock()
 	defer stats.mu.Unlock()
 
@@ -499,11 +396,10 @@ func (dh *DmlHandler) statsSetResult(datasourceIdx int, latencyMs int64, isError
 // 1-minute timeout rate for the given datasource index. Used by the
 // router to fill the self node's DatasourceInfo for health/balancer. If
 // the summary has no samples, p95 is reported as 16.
-func (dh *DmlHandler) StatsGet(datasourceIdx int) (latencyP95Ms int, errorRate1m float64, timeoutRate1m float64) {
-	stats := dh.statsInfos[datasourceIdx]
-	stats.mu.Lock()
-	defer stats.mu.Unlock()
+func (rh *RequestHandler) StatsGet(datasourceIdx int) (runningRead int, runningWrite int, runningTx int, latencyP95Ms int, errorRate1m float64, timeoutRate1m float64) {
+	stats := rh.statsInfos[datasourceIdx]
 
+	stats.mu.Lock()
 	latency := &dto.Metric{}
 	stats.statLatency.WithLabelValues("p95").(prometheus.Metric).Write(latency)
 	p95 := latency.GetSummary().GetQuantile()[0].GetValue()
@@ -518,18 +414,19 @@ func (dh *DmlHandler) StatsGet(datasourceIdx int) (latencyP95Ms int, errorRate1m
 		errorRate1m = float64(stats.statErrors.Rate()) / total
 		timeoutRate1m = float64(stats.statTimeouts.Rate()) / total
 	}
+	stats.mu.Unlock()
 
-	return int(p95), errorRate1m, timeoutRate1m
+	runningRead, runningWrite, runningTx = rh.dsManager.StatsGet(datasourceIdx)
+
+	return runningRead, runningWrite, runningTx, int(p95), errorRate1m, timeoutRate1m
 }
-
-// parseRequest and param conversion helpers (used by DmlHandler).
 
 // parseRequest reads the JSON body into RequestParams (SQL, Params,
 // TimeoutSec, LimitRows), converts Params to driver values via
 // convertParams, and overrides TimeoutSec from HEADER_TIMEOUT_SEC if
 // present. The body is consumed and closed. Returns an error if JSON
 // decode fails, SQL is empty, or param conversion fails.
-func (dh *DmlHandler) parseRequest(r *http.Request) (request *RequestParams, params []any, err error) {
+func parseRequest(r *http.Request) (request *RequestParams, params []any, err error) {
 	if r.Body != nil {
 		defer func() {
 			io.Copy(io.Discard, r.Body)
@@ -579,7 +476,7 @@ func convertParams(params []ParamValue) ([]any, error) {
 }
 
 // convertParam converts a single ParamValue to a driver-compatible value
-// based on its Type (NULL, INT, LONG, DOUBLE, DECIMAL, BOOL, STRING, BINARY,
+// based on its Type (NULL, BOOL, INT, LONG, FLOAT, DOUBLE, DECIMAL, STRING, BINARY,
 // DATE, DATETIME). Accepts various JSON number/string representations and
 // returns an error for invalid or unknown types.
 func convertParam(p ParamValue) (any, error) {
@@ -590,6 +487,19 @@ func convertParam(p ParamValue) (any, error) {
 	switch p.Type {
 	case NULL:
 		return nil, nil
+	case BOOL:
+		if val, ok := p.Value.(bool); ok {
+			return val, nil
+		}
+		if val, ok := p.Value.(string); ok {
+			switch strings.ToLower(val) {
+			case "true", "1":
+				return true, nil
+			case "false", "0":
+				return false, nil
+			}
+		}
+		return nil, fmt.Errorf("Invalid bool value: %v", p.Value)
 	case INT:
 		if val, ok := p.Value.(int32); ok {
 			return val, nil
@@ -600,11 +510,8 @@ func convertParam(p ParamValue) (any, error) {
 		if val, ok := p.Value.(int); ok {
 			return int32(val), nil
 		}
-		if val, ok := p.Value.(int64); ok {
-			return int32(val), nil
-		}
 		if val, ok := p.Value.(string); ok {
-			var intVal int
+			var intVal int32
 			_, err := fmt.Sscanf(val, "%d", &intVal)
 			if err != nil {
 				return nil, fmt.Errorf("Invalid int32 string: %v", err)
@@ -622,9 +529,6 @@ func convertParam(p ParamValue) (any, error) {
 		if val, ok := p.Value.(int); ok {
 			return int64(val), nil
 		}
-		if val, ok := p.Value.(int32); ok {
-			return int64(val), nil
-		}
 		if val, ok := p.Value.(string); ok {
 			var intVal int64
 			_, err := fmt.Sscanf(val, "%d", &intVal)
@@ -634,12 +538,34 @@ func convertParam(p ParamValue) (any, error) {
 			return intVal, nil
 		}
 		return nil, fmt.Errorf("Invalid int64 value: %v", p.Value)
-	case DOUBLE:
+	case FLOAT:
 		if val, ok := p.Value.(float32); ok {
 			return val, nil
 		}
 		if val, ok := p.Value.(float64); ok {
+			return float32(val), nil
+		}
+		if val, ok := p.Value.(int); ok {
+			return float32(val), nil
+		}
+		if val, ok := p.Value.(string); ok {
+			var floatVal float32
+			_, err := fmt.Sscanf(val, "%f", &floatVal)
+			if err != nil {
+				return nil, fmt.Errorf("Invalid float32 string: %v", err)
+			}
+			return floatVal, nil
+		}
+		return nil, fmt.Errorf("Invalid float32 value: %v", p.Value)
+	case DOUBLE:
+		if val, ok := p.Value.(float64); ok {
 			return val, nil
+		}
+		if val, ok := p.Value.(float32); ok {
+			return float64(val), nil
+		}
+		if val, ok := p.Value.(int); ok {
+			return float64(val), nil
 		}
 		if val, ok := p.Value.(string); ok {
 			var floatVal float64
@@ -650,37 +576,12 @@ func convertParam(p ParamValue) (any, error) {
 			return floatVal, nil
 		}
 		return nil, fmt.Errorf("Invalid float64 value: %v", p.Value)
-	case DECIMAL:
-		if val, ok := p.Value.(decimal.Decimal); ok {
-			return val, nil
-		}
-		if val, ok := p.Value.(string); ok {
-			dec, err := decimal.NewFromString(val)
-			if err != nil {
-				return nil, fmt.Errorf("Invalid decimal string: %w", err)
-			}
-			return dec, nil
-		}
-		return nil, fmt.Errorf("Invalid decimal value: %v", p.Value)
-	case BOOL:
-		if val, ok := p.Value.(bool); ok {
-			return val, nil
-		}
-		if val, ok := p.Value.(string); ok {
-			switch val {
-			case "true":
-				return true, nil
-			case "false":
-				return false, nil
-			}
-		}
-		return nil, fmt.Errorf("Invalid bool value: %v", p.Value)
 	case STRING:
 		if val, ok := p.Value.(string); ok {
 			return val, nil
 		}
 		return fmt.Sprintf("%v", p.Value), nil
-	case BINARY:
+	case BYTES:
 		if val, ok := p.Value.([]byte); ok {
 			return val, nil
 		}
@@ -704,7 +605,243 @@ func convertParam(p ParamValue) (any, error) {
 			return t, nil
 		}
 		return nil, fmt.Errorf("Invalid timestamp_rfc3339 value: %v", p.Value)
+	case AS_IS:
+		return p.Value, nil
 	default:
 		return nil, fmt.Errorf("Unknown param type: %s", p.Type)
 	}
+}
+
+// BeginTxRequest represents the request body for /v1/rdb/tx/begin
+type TxRequestParams struct {
+	IsolationLevel  *string `json:"isolationLevel,omitempty"`
+	MaxTxTimeoutSec *int    `json:"maxTxTimeoutSec,omitempty"`
+}
+
+// BeginTxResponse represents the response for /v1/rdb/tx/begin
+type BeginTxResponse struct {
+	TxID      string    `json:"txId"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+// OkResponse represents a simple OK response
+type OkResponse struct {
+	OK bool `json:"ok"`
+}
+
+// BeginTx handles POST /rdb/tx/begin.
+// It parses the body (optional isolationLevel, maxTxTimeoutSec) and the
+// datasource index from context (set by balancer). It starts a transaction
+// on that datasource and responds with txId and expiresAt. On timeout it
+// returns 408; on parse or begin failure it returns 400 or 5xx with an
+// error code.
+func (rh *RequestHandler) BeginTx(w http.ResponseWriter, r *http.Request) {
+	dsIDX, req, isolationLevel, err := parseTxRequest(r)
+	if err != nil {
+		ResponseError(w, r, RP_BAD_REQUEST, err.Error())
+		return
+	}
+
+	global.GetCtxLogger(r.Context()).Debug("TxHandler", "detail", "BeginTx", "dsIDX", dsIDX, "isolationLevel", isolationLevel, "maxTxTimeoutSec", req.MaxTxTimeoutSec)
+
+	// Begin transaction (default isolation level: ReadCommitted)
+	txEntry, err := rh.dsManager.BeginTx(r.Context(), dsIDX, isolationLevel, req.MaxTxTimeoutSec)
+	if err != nil {
+		if err == context.DeadlineExceeded {
+			ResponseError(w, r, RP_CLIENT_CANCELLED, "Request timeout for BeginTx")
+			return
+		}
+		ResponseError(w, r, RP_DATASOURCE_EXCEPTION, err.Error())
+		return
+	}
+
+	// Write response
+	response := BeginTxResponse{
+		TxID:      txEntry.TxID,
+		ExpiresAt: txEntry.ExpiresAt,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}
+
+// CommitTx handles PUT /rdb/tx/commit.
+// The transaction ID is taken from the request header. It commits the
+// transaction in DsManager. Returns 409 if the transaction is not found,
+// or 5xx on DB error. On success responds with {"ok": true}.
+func (rh *RequestHandler) CommitTx(w http.ResponseWriter, r *http.Request) {
+	txID := getTxID(r)
+
+	if txID == "" {
+		ResponseError(w, r, RP_BAD_REQUEST, "TxId is required")
+		return
+	}
+
+	global.GetCtxLogger(r.Context()).Debug("TxHandler", "detail", "CommitTx", "txID", txID)
+
+	// Commit transaction
+	err := rh.dsManager.CommitTx(txID)
+	if err != nil {
+		if err == ErrDsNotFound {
+			ResponseError(w, r, RP_DATASOURCE_NOT_FOUND, "Datasource not found for CommitTx")
+			return
+		}
+		if err == ErrTxNotFound {
+			ResponseError(w, r, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for CommitTx")
+			return
+		}
+		if err == context.DeadlineExceeded {
+			ResponseError(w, r, RP_CLIENT_CANCELLED, "Request timeout for CommitTx")
+			return
+		}
+		ResponseError(w, r, RP_DATASOURCE_EXCEPTION, err.Error())
+		return
+	}
+
+	// Write response
+	response := OkResponse{
+		OK: true,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}
+
+// RollbackTx handles PUT /rdb/tx/rollback.
+// The transaction ID is taken from the request header. It rolls back the
+// transaction in DsManager. Returns 409 if not found, 5xx on DB error.
+// On success responds with {"ok": true}.
+func (rh *RequestHandler) RollbackTx(w http.ResponseWriter, r *http.Request) {
+	txID := getTxID(r)
+
+	if txID == "" {
+		ResponseError(w, r, RP_BAD_REQUEST, "TxId is required")
+		return
+	}
+
+	global.GetCtxLogger(r.Context()).Debug("TxHandler", "detail", "RollbackTx", "txID", txID)
+
+	// Rollback transaction
+	err := rh.dsManager.RollbackTx(txID)
+	if err != nil {
+		if err == ErrDsNotFound {
+			ResponseError(w, r, RP_DATASOURCE_NOT_FOUND, "Datasource not found for RollbackTx")
+			return
+		}
+		if err == ErrTxNotFound {
+			ResponseError(w, r, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for RollbackTx")
+			return
+		}
+		if err == context.DeadlineExceeded {
+			ResponseError(w, r, RP_CLIENT_CANCELLED, "Request timeout for RollbackTx")
+			return
+		}
+		ResponseError(w, r, RP_DATASOURCE_EXCEPTION, err.Error())
+		return
+	}
+
+	// Write response
+	response := OkResponse{
+		OK: true,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}
+
+// CloseTx handles PUT /rdb/tx/close.
+// The transaction ID is taken from the request header. It removes the
+// transaction from the manager, releases semaphores, and closes the
+// connection (no commit or rollback). Returns 409 if not found. On
+// success responds with {"ok": true}.
+func (rh *RequestHandler) CloseTx(w http.ResponseWriter, r *http.Request) {
+	txID := getTxID(r)
+
+	if txID == "" {
+		ResponseError(w, r, RP_BAD_REQUEST, "TxId is required")
+		return
+	}
+
+	global.GetCtxLogger(r.Context()).Debug("TxHandler", "detail", "CloseTx", "txID", txID)
+
+	// Close transaction
+	err := rh.dsManager.CloseTx(txID)
+	if err != nil {
+		if err == ErrDsNotFound {
+			ResponseError(w, r, RP_DATASOURCE_NOT_FOUND, "Datasource not found for CloseTx")
+			return
+		}
+		if err == ErrTxNotFound {
+			ResponseError(w, r, RP_DATASOURCE_TX_NOT_FOUND, "Transaction not found for CloseTx")
+			return
+		}
+		if err == context.DeadlineExceeded {
+			ResponseError(w, r, RP_CLIENT_CANCELLED, "Request timeout for CloseTx")
+			return
+		}
+		ResponseError(w, r, RP_DATASOURCE_EXCEPTION, err.Error())
+		return
+	}
+
+	// Write response
+	response := OkResponse{
+		OK: true,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}
+
+// parseTxRequest reads the JSON body into TxRequestParams, gets the
+// datasource index from the request context (set by balancer), and
+// optionally maps isolationLevel string to sql.IsolationLevel. Empty body
+// is allowed. Returns error on decode failure, missing ds index, or
+// invalid isolation level.
+func parseTxRequest(r *http.Request) (int, *TxRequestParams, *sql.IsolationLevel, error) {
+	if r.Body != nil {
+		defer func() {
+			io.Copy(io.Discard, r.Body)
+			r.Body.Close()
+		}()
+	}
+
+	var req TxRequestParams
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return -1, nil, nil, fmt.Errorf("Failed to parse request: %w", err)
+	}
+
+	// get datasourceId from context
+	dsIDX, ok := GetCtxDsIdx(r)
+	if !ok {
+		return -1, nil, nil, fmt.Errorf("Datasource INDEX hasn't decided by Balancer")
+	}
+
+	if req.IsolationLevel == nil {
+		return dsIDX, &req, nil, nil
+	}
+
+	isolationLevel := sql.LevelDefault
+	switch *req.IsolationLevel {
+	case "READ_UNCOMMITTED":
+		isolationLevel = sql.LevelReadUncommitted
+	case "READ_COMMITTED":
+		isolationLevel = sql.LevelReadCommitted
+	case "REPEATABLE_READ":
+		isolationLevel = sql.LevelRepeatableRead
+	case "SERIALIZABLE":
+		isolationLevel = sql.LevelSerializable
+	default:
+		return -1, nil, nil, fmt.Errorf("Invalid isolation level: %s. (expected: READ_UNCOMMITTED, READ_COMMITTED, REPEATABLE_READ, SERIALIZABLE)", *req.IsolationLevel)
+	}
+
+	return dsIDX, &req, &isolationLevel, nil
+}
+
+// getTxID returns the value of the transaction ID header (HEADER_TX_ID).
+func getTxID(r *http.Request) string {
+	return r.Header.Get(HEADER_TX_ID)
 }

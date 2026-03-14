@@ -58,28 +58,24 @@ func EmbedLogger() func(next http.Handler) http.Handler {
 
 type Router struct {
 	chi.Router
-	balancer   *cluster.Balancer
-	dsManager  *rdb.DsManager
-	dmlHandler *rdb.DmlHandler
-	txHandler  *rdb.TxHandler
+	balancer *cluster.Balancer
+	handler  *rdb.RequestHandler
 }
 
 // NewRouter creates and returns the application router.
 // It wires chi with middleware: Logger, Recoverer, and balancer.SelectNode.
 // Then it builds DmlHandler and TxHandler from the given dsManager,
 // registers all routes via setupRoutes, and returns the configured Router.
-func NewRouter(balancer *cluster.Balancer, dsManager *rdb.DsManager) *Router {
+func NewRouter(balancer *cluster.Balancer, handler *rdb.RequestHandler) *Router {
 	r := chi.NewRouter()
 	r.Use(EmbedLogger())
 	r.Use(middleware.Recoverer)
 	r.Use(balancer.SelectNode)
 
 	router := &Router{
-		Router:     r,
-		balancer:   balancer,
-		dsManager:  dsManager,
-		dmlHandler: rdb.NewDmlHandler(dsManager),
-		txHandler:  rdb.NewTxHandler(dsManager),
+		Router:   r,
+		balancer: balancer,
+		handler:  handler,
 	}
 
 	router.setupRoutes()
@@ -104,7 +100,7 @@ func (r *Router) StartHealthTicker() {
 			otherNodes = append(otherNodes, node)
 		}
 	}
-	// r.balancer.OtherNodes = otherNodes // TODO: comment out for debug
+	r.balancer.OtherNodes = otherNodes
 
 	selfNode := r.balancer.SelfNode
 	selfNode.Mu.Lock()
@@ -129,8 +125,8 @@ const HEALZ_ERROR_INTERVAL = 15 * time.Second
 // response (or sets status HEALZERR on failure; HEALZERR nodes are skipped
 // until HEALZ_ERROR_INTERVAL has passed). If isSync is true, it waits for all
 // goroutines to finish before returning. It also refreshes the self node's
-// datasource stats (running read/write/tx counts and DmlHandler latency/error/
-// timeout rates) from dsManager and dmlHandler.
+// datasource stats (running read/write/tx counts and RequestHandler latency/error/
+// timeout rates) from dsManager and RequestHandler.
 func (r *Router) collectHealth(isSync bool) {
 	logger := global.GetCtxLogger(context.TODO())
 
@@ -202,8 +198,7 @@ func (r *Router) collectHealth(isSync bool) {
 	selfNode := r.balancer.SelfNode
 	selfNode.Mu.Lock()
 	for dsIdx := range selfNode.Datasources {
-		runningRead, runningWrite, runningTx := r.dsManager.StatsGet(dsIdx)
-		latencyP95Ms, errorRate1m, timeoutRate1m := r.dmlHandler.StatsGet(dsIdx)
+		runningRead, runningWrite, runningTx, latencyP95Ms, errorRate1m, timeoutRate1m := r.handler.StatsGet(dsIdx)
 
 		dsInfo := &selfNode.Datasources[dsIdx]
 		dsInfo.RunningRead = runningRead
@@ -237,17 +232,17 @@ func (r *Router) setupRoutes() {
 	// API v1 routes
 	r.Route("/rdb", func(router chi.Router) {
 		// Execute endpoint
-		router.Post(global.EP_PATH_QUERY, r.dmlHandler.Query)
-		router.Post(global.EP_PATH_EXECUTE, r.dmlHandler.Execute)
+		router.Post(global.EP_PATH_QUERY, r.handler.Query)
+		router.Post(global.EP_PATH_EXECUTE, r.handler.Execute)
 
 		// Transaction endpoints
 		router.Route("/tx", func(txRouter chi.Router) {
-			txRouter.Post(global.EP_PATH_TX_BEGIN, r.txHandler.BeginTx)
-			txRouter.Post(global.EP_PATH_QUERY, r.dmlHandler.QueryTx)
-			txRouter.Post(global.EP_PATH_EXECUTE, r.dmlHandler.ExecuteTx)
-			txRouter.Put(global.EP_PATH_TX_COMMIT, r.txHandler.CommitTx)
-			txRouter.Put(global.EP_PATH_TX_ROLLBACK, r.txHandler.RollbackTx)
-			txRouter.Put(global.EP_PATH_TX_CLOSE, r.txHandler.CloseTx)
+			txRouter.Post(global.EP_PATH_TX_BEGIN, r.handler.BeginTx)
+			txRouter.Post(global.EP_PATH_QUERY, r.handler.QueryTx)
+			txRouter.Post(global.EP_PATH_EXECUTE, r.handler.ExecuteTx)
+			txRouter.Put(global.EP_PATH_TX_COMMIT, r.handler.CommitTx)
+			txRouter.Put(global.EP_PATH_TX_ROLLBACK, r.handler.RollbackTx)
+			txRouter.Put(global.EP_PATH_TX_CLOSE, r.handler.CloseTx)
 		})
 	})
 }

@@ -38,18 +38,18 @@ import (
 // initSlog sets the default slog handler with the given level and log file under logDir.
 // Level: debug, info, warn, error (default info). Creates logDir if missing; uses lumberjack for rotation.
 func initSlog(lg global.LoggerConfig) {
-	var l slog.Level
+	var lev slog.Level
 	switch strings.ToLower(strings.TrimSpace(lg.Level)) {
 	case "debug":
-		l = slog.LevelDebug
+		lev = slog.LevelDebug
 	case "info", "":
-		l = slog.LevelInfo
+		lev = slog.LevelInfo
 	case "warn":
-		l = slog.LevelWarn
+		lev = slog.LevelWarn
 	case "error":
-		l = slog.LevelError
+		lev = slog.LevelError
 	default:
-		l = slog.LevelInfo
+		lev = slog.LevelInfo
 	}
 
 	logDir := strings.TrimSpace(lg.Dir)
@@ -83,7 +83,7 @@ func initSlog(lg global.LoggerConfig) {
 		Compress:   lg.Compress,
 	}
 
-	slog.SetDefault(slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: l})))
+	slog.SetDefault(slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: lev})))
 }
 
 // runServer starts the HTTP server with the given configuration.
@@ -138,6 +138,7 @@ func runServer(config global.Config) {
 	fmt.Printf("### [Config] Node ID: %s\n", thisNode.NodeID)
 	fmt.Printf("### [Config] Node Name: %s\n", config.NodeName)
 	fmt.Printf("### [Config] Max Client HTTP Queue: %d\n", maxHttpQueue)
+	fmt.Printf("### [Config] Streaming Response Mode: %v\n", config.StreamingResponseMode)
 	fmt.Printf("### [Config] Datasources: %v\n", datasourceInfo)
 
 	// collect cluster health information
@@ -151,7 +152,8 @@ func runServer(config global.Config) {
 	balancer := cluster.NewBalancer(thisNode, clusterNodes)
 
 	// Create router
-	router := NewRouter(balancer, dsManager)
+	handler := rdb.NewRequestHandler(dsManager, config.StreamingResponseMode)
+	router := NewRouter(balancer, handler)
 
 	// Create HTTP server
 	server := &http.Server{
@@ -165,7 +167,7 @@ func runServer(config global.Config) {
 
 	// Start server in a goroutine
 	go func() {
-		fmt.Printf("### [Server] Starting on port: %d\n", config.NodePort)
+		fmt.Printf("### [Config] Server starting on port: %d\n", config.NodePort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			fmt.Printf("### [Server] Server failed to start: %v\n", err)
 			os.Exit(1)
