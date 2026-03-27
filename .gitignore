@@ -1,1 +1,4 @@
 .DS_Store
+config.test.yaml
+logs/
+server
